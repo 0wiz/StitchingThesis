@@ -12,7 +12,7 @@ from datetime import datetime
 from operator import attrgetter as attr
 
 #Local libraries
-import resources.image_interpolator as localWarper # type: ignore
+import resources.image_interpolator as stitch # type: ignore
 
 # Macros
 timestamp = lambda: datetime.now().strftime('%Y-%m-%d %H.%M.%S')
@@ -26,7 +26,6 @@ kp1, des1 = (None, None)
 kp2, des2 = (None, None)
 
 # OpenCV
-maxCVal = np.iinfo(np.uint8).max
 cvImg1, cvImg2 = (None, None)
 imgH, imgW, imgC = (None, None, None)
 downscale = None
@@ -40,26 +39,12 @@ cBarPad = .01
 scatMS = 1
 
 #        ----- Global function declarations -----        #
-
-# Save image according to set standard and type
-def save(name, img, path=savePath, stamp=timestamp(), compression=10, imgExt = imgExt):
-    if True:
-        if isinstance(img, plt.Figure):
-            img.savefig(path+name+' '+stamp+'.pdf', bbox_inches='tight')
-        elif isinstance(img, np.ndarray):
-            if imgExt == '.jpg':
-                if img.shape[-1] > imgC:
-                    img[img[:,:,-1] == 0] = maxCVal
-                cv.imwrite(path+name+' '+stamp+imgExt, img, [cv.IMWRITE_JPEG_QUALITY, 100-compression])
-            elif imgExt == '.png':
-                cv.imwrite(path+name+' '+stamp+imgExt, img, [cv.IMWRITE_PNG_COMPRESSION, int(np.round(9*compression/100))])
-
 # Draw box(es) with text(s) on an OpenCV image
-def cvTextBox(img, text, loc=(20,20), margin=(3,6), alpha=.4, font=cv.FONT_HERSHEY_DUPLEX, size=1, fc=(0,0,0), bc=maxCVal, thickness=2, lineType=cv.LINE_AA):
+def cvTextBox(img, text, loc=(20, 20), margin=(3, 6), alpha=.4, font=cv.FONT_HERSHEY_DUPLEX, size=1, fc=(0,0,0), bc=stitch.maxCVal, thickness=2, lineType=cv.LINE_AA):
     if isinstance(text, str):
         text = [text]
     if img.shape[-1] > imgC:
-        fc = (*fc, maxCVal)
+        fc = (*fc, stitch.maxCVal)
     size *= img.shape[1] / 2000
     margin = (size*margin[0], size*margin[1])
     thickness = max(int(size*thickness), 1)
@@ -97,7 +82,7 @@ def points2DistAng(p1, p2):
 ##########################################################
 
 # Unpacks an OpenCV DMatch array into two 2-by-n Numpy Matrices, for example 'p1, p2 = unpackDMatchPoints(matches)' where 'p1 = [[x1, x2, .., xn], [y1, y2, .., yn]]'
-match2Points = lambda matches: [np.array([[kp[idx(m)].pt[dim] for m in matches] for dim in (0,1)]) for (kp,idx) in ((kp1, attr('queryIdx')), (kp2, attr('trainIdx')))]
+match2Points = lambda matches: [np.array([[kp[idx(m)].pt[dim] for m in matches] for dim in (0,1)]) for (kp, idx) in ((kp1, attr('queryIdx')), (kp2, attr('trainIdx')))]
 
 # Filter out matches lower than median similarity
 def MedSim(matches, inStr='m'):
@@ -111,7 +96,7 @@ def RANSAC(matches, inStr='m', t=30):
     filtered = [matches[i] for i,l in enumerate(labels) if l == 1]
     return filtered, 'RANSAC(%s, t=%d)' % (inStr, t)
 
-def FeatureDetection(image1, image2, ransac_tol = 30, order = 2):
+def FeatureDetection(image1, image2, ransac_tol=30, order=2):
     global cvImg1, cvImg2, imgH, imgW, imgC, downscale, kp1, des1, kp2, des2
 
     cvImg1, cvImg2 = (image1, image2)
@@ -122,14 +107,16 @@ def FeatureDetection(image1, image2, ransac_tol = 30, order = 2):
     featureFinder = cv.SIFT_create()
     kp1, des1 = featureFinder.detectAndCompute(cv.cvtColor(image1, cv.COLOR_BGR2GRAY), None)
     kp2, des2 = featureFinder.detectAndCompute(cv.cvtColor(image2, cv.COLOR_BGR2GRAY), None)
+    
     # Match keypoints & evaluate filtering
     matcher = cv.BFMatcher(crossCheck=True)
     matches = matcher.match(des1, des2)
+
     # Filter
-    filterMatches, _ = RANSAC(*MedSim(matches), t = ransac_tol)
+    filterMatches, _ = RANSAC(*MedSim(matches), t=ransac_tol)
     degree = [order, 0]; minAlgo = 'Powell'; tol = 1e-6
-    c1 = c2 = np.zeros((2, localWarper.polyTerms2D(*degree)))
+    c1 = c2 = np.zeros((2, stitch.polyTerms2D(*degree)))
     p1, p2 = match2Points(filterMatches)
-    p1G, p2G, translation, rotation, center, angle = localWarper.globalAlignment(p1, p2)
-    p1L, p2L, c1, c2 = localWarper.localAlignment(p1G, p2G, c1, c2, degree, minAlgo, tol)
+    p1G, p2G, translation, rotation, center, angle = stitch.globalAlignment(p1, p2)
+    p1L, p2L, c1, c2 = stitch.localAlignment(p1G, p2G, c1, c2, degree, minAlgo, tol)
     return p1L, p2L, c1, c2, translation, rotation, center, angle

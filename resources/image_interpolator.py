@@ -1,10 +1,31 @@
+# Math
 import numpy as np
-from scipy.optimize import minimize
 import matplotlib.pyplot as plt
+from scipy.optimize import minimize
 
-##########################################################
-#       ----- Functions related to alignment -----       #
-##########################################################
+# Data
+import cv2 as cv
+from pathlib import Path
+from datetime import datetime
+
+# General Declarations
+timestamp = lambda: datetime.now().strftime('%Y-%m-%d %H.%M.%S')
+maxCVal = np.iinfo(np.uint8).max
+
+# Save image according to set standard and type
+def save(name, img, stamp=timestamp, path='Figures/', compression=50, imgExt='.jpg'):
+    Path(path).mkdir(exist_ok=True)
+    if callable(stamp):
+        stamp = stamp()
+    if isinstance(img, plt.Figure):
+        img.savefig(path+name+' '+stamp+'.pdf', bbox_inches='tight')
+    elif isinstance(img, np.ndarray):
+        if imgExt == '.jpg':
+            if img.shape[-1] > 3:
+                img[img[:,:,-1] == 0] = maxCVal # Set alpha to max to prevent zero-opacity being interpreted as black
+            cv.imwrite(path+name+' '+stamp+imgExt, img, [cv.IMWRITE_JPEG_QUALITY, 100-compression])
+        elif imgExt == '.png':
+            cv.imwrite(path+name+' '+stamp+imgExt, img, [cv.IMWRITE_PNG_COMPRESSION, int(np.round(9*compression/100))])
 
 # Rotation matrix to matrix-pre-multiply coordinates in the format [[x₁, x₂, ..., xₙ], [y₁, y₂, ..., yₙ]]
 rotMat = lambda angle: np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
@@ -29,11 +50,10 @@ def minF(c, p, goal, degree):
     error = np.linalg.norm(goal-fit, axis=0)
     return np.mean(error)
 
-
 # Perform global translation and rotation, then calculate the remaining error (distance)
 def globalAlignment(p1, p2, translation=None, rotation=None, center=None, angle=None):
     if center is None:
-        center = [np.mean(p, axis=1).reshape(2, 1) for p in (p1,p2)]
+        center = [np.mean(p, axis=1).reshape(2, 1) for p in (p1, p2)]
     if rotation is None:
         if angle is None:
             angle = [np.mean(np.arctan2(y, x)) for x,y in (p1-center[0], p2-center[1])]
@@ -41,28 +61,25 @@ def globalAlignment(p1, p2, translation=None, rotation=None, center=None, angle=
     if translation is None:
         translation = [sign*(center[1]-center[0])/2 for sign in (1,-1)]
 
-    p1, p2 = [rotation[i] @ (p - center[i]) + center[i] + translation[i] for i,p in enumerate((p1,p2))]
+    p1, p2 = [rotation[i] @ (p - center[i]) + center[i] + translation[i] for i,p in enumerate((p1, p2))]
     return p1, p2, translation, rotation, center, angle
 
 # Find polynom for warping and calculate warp-vectors, then calculate the remaining error (distance)
-def localAlignment(p1, p2, c1, c2, degree, algorithm=None, tol=None):
+def localAlignment(p1, p2, c1, c2, degree, algorithm=None, tol=None, options=dict(maxiter=1e12)):
     if algorithm is not None:
-        o1 = minimize(minF, c1.ravel(), (p1, (p2-p1)/2, degree), algorithm, tol=tol, options = {"maxiter":1e12})
-        o2 = minimize(minF, c2.ravel(), (p2, (p1-p2)/2, degree), algorithm, tol=tol, options = {"maxiter":1e12})
+        o1 = minimize(minF, c1.ravel(), (p1, (p2-p1)/2, degree), algorithm, tol=tol, options=options)
+        o2 = minimize(minF, c2.ravel(), (p2, (p1-p2)/2, degree), algorithm, tol=tol, options=options)
         c1, c2 = np.split(o1.x, 2), np.split(o2.x, 2)
-        if not (o1.success and o2.success):
-            print('Scipy.Optimize.Minimize failed to reach the threshold for tolerated error!')
     
-    p1 = p1+np.sum([polyVal2D(*p1, c1[dim], *degree) for dim in (0,1)], axis=1)
-    p2 = p2+np.sum([polyVal2D(*p2, c2[dim], *degree) for dim in (0,1)], axis=1)
-    return p1, p2, c1, c2
+    l1 = np.sum([polyVal2D(*p1, c1[dim], *degree) for dim in (0,1)], axis=1)
+    l2 = np.sum([polyVal2D(*p2, c2[dim], *degree) for dim in (0,1)], axis=1)
+    errorC = np.mean(np.abs(np.vstack(((p2-p1)/2-l1, (p1-p2)/2-l2))), axis=1)
 
-##########################################################
-#       ----- Functions related to image warp -----       #
-##########################################################
+    print('Mean warp-error-to-goal per coefficient set:   e1x=%.3f,   e1y=%.3f,   e2x=%.3f,   e2y=%.3f' % tuple(errorC))
+    return p1+l1, p2+l2, c1, c2
 
 # Overlay two images based on index points before and after transformation
-def overlayImages(p0, p1, p2, translation, maxCVal, imgC, imgs):
+def overlayImages(p0, p1, p2, imgC, imgs):
     overlap, notover, diffImg, overlapIdxs = getOverlapAndNotover(p0, p1, p2, imgC, imgs)
 
     newImg = np.mean(overlap, axis=0) + np.sum(notover, axis=0)
@@ -74,19 +91,17 @@ def overlayImages(p0, p1, p2, translation, maxCVal, imgC, imgs):
 
 # Defines and returns the overlap for the transformed points
 def getOverlapAndNotover(p0, p1, p2, imgC, imgs):
-
     minX, maxX, minY, maxY = [int(f(np.append(p1[dim], p2[dim]))) for dim in (0,1) for f in (min, max)]
-    width, height = maxX-minX, maxY-minY
-    newImg = np.zeros((2, height+500, width+500, imgC))
+    newImg = np.zeros((2, maxY-minY+1, maxX-minX+1, imgC))
 
     for i, p in enumerate((p1, p2)):
-        imgIdx = p.astype(int)+[[abs(minX)], [abs(minY)]]
+        imgIdx = p.astype(int) - [[minX], [minY]]
         newImg[i][*imgIdx[::-1]] = imgs[i][*p0[::-1]]
 
     diffImg = np.tile(np.abs(np.sum(newImg[0]-newImg[1], axis=2, keepdims=True) / imgC), (1,1,4))
-    diffImg[np.any(diffImg, axis=2),-1] = 255
+    diffImg[np.any(diffImg, axis=2),-1] = maxCVal
     
-    overlapIdxs = np.all(np.any(newImg, axis=3), axis=0)
+    overlapIdxs = np.all(np.any(newImg, axis=-1), axis=0)
     overlap, notover = np.copy(newImg), np.copy(newImg)
     
     overlap[:,~overlapIdxs,:] = 0
@@ -152,11 +167,11 @@ def refineOverlap(overlap, s=1):
     return overlap  # Return the refined overlap image
 
 # Perform local and global alignment for given c values
-def mergeAndWarpImages(p01, p02, c1, c2, degree, translation, rotation, center, maxCVal, imgC, imgs):
+def mergeAndWarpImages(p01, p02, c1, c2, degree, translation, rotation, center, imgC, imgs):
     # Apply warping to the images
     p1, p2 = globalAlignment(p01, p02, translation, rotation, center)[:2]
     p1, p2 = localAlignment(p1, p2, c1, c2, degree)[:2]
-    img, diff, pct, overlap = overlayImages(p01, p1, p2, translation, maxCVal = maxCVal, imgC = imgC, imgs = imgs)
+    img, diff, pct, overlap = overlayImages(p01, p1, p2, imgC, imgs)
     return img, diff, overlap, pct, p1, p2
 
 # Returns a side by side image of the refined overlaps
@@ -166,29 +181,29 @@ def refineAndConcatenateOverlaps(p0, p1, p2, imgC, imgs):
 
     overlap_bool = overlap2 != 0
     notover[overlap_bool] = 0
-    overlap_bool = np.any(np.any(overlap_bool, axis = 0), axis = -1)
+    overlap_bool = np.any(np.any(overlap_bool, axis=0), axis=-1)
 
-    y_min = np.min(np.where(np.any(overlap_bool, axis = 1)))
-    y_max = np.max(np.where(np.any(overlap_bool, axis = 1)))
-    x_min = np.min(np.where(np.any(overlap_bool, axis = 0)))
-    x_max = np.max(np.where(np.any(overlap_bool, axis = 0)))
+    y_min = np.min(np.where(np.any(overlap_bool, axis=1)))
+    y_max = np.max(np.where(np.any(overlap_bool, axis=1)))
+    x_min = np.min(np.where(np.any(overlap_bool, axis=0)))
+    x_max = np.max(np.where(np.any(overlap_bool, axis=0)))
 
     overlap1 = overlap2[0,y_min:y_max,x_min:x_max,:] + notover[0,y_min:y_max,x_min:x_max,:]
     overlap2 = overlap2[1,y_min:y_max,x_min:x_max,:] + notover[1,y_min:y_max,x_min:x_max,:]
-    return np.concatenate([overlap1,overlap2], axis= 1)
+    return np.concatenate([overlap1,overlap2], axis=1)
 
 #Applies the c functions to both images with a given inital overlap
-def opticalFlowInterpolator(image1, image2, c_dis, c_no_dis, order, overlapDisplacement, maxCVal, imgC, imgs, showTranslation = False):
+def opticalFlowInterpolator(image1, image2, c_dis, c_no_dis, order, overlapDisplacement, imgC, imgs, showTranslation=False):
     p01_Y = np.arange(image1.shape[0])
     p01_X = np.arange(image1.shape[1])
 
-    p01_y,p01_x = np.meshgrid(p01_Y,p01_X)
+    p01_y, p01_x = np.meshgrid(p01_Y, p01_X)
 
     p01 = np.array([p01_x.ravel(),p01_y.ravel()])
 
     p02_Y = np.arange(image2.shape[0])
     p02_X = np.arange(image2.shape[1])
-    p02_y,p02_x = np.meshgrid(p02_Y,p02_X)
+    p02_y, p02_x = np.meshgrid(p02_Y, p02_X)
 
     p02 = np.array([p02_x.ravel(),p02_y.ravel()])
 
@@ -197,15 +212,15 @@ def opticalFlowInterpolator(image1, image2, c_dis, c_no_dis, order, overlapDispl
     p1, p2 = globalAlignment(p01, p02, translation, rotation, center, angle)[:2]
 
     if showTranslation:
-        img_trans, _, _ ,_ = overlayImages(p01, p1, p2, translation, maxCVal = maxCVal, imgC = imgC, imgs = imgs)
-        plt.figure(figsize = (15,15))
+        img_trans = overlayImages(p01, p1, p2, imgC, imgs)[0]
+        plt.figure(figsize=(15, 15))
         plt.axis('off')
         plt.imshow((img_trans)/np.max((img_trans)))
         plt.show()
     p1, p2 = localAlignment(p01, p02, c_no_dis, c_dis,[order])[:2]
 
     print('Image aligned')
-    img, diff, pct , overlap= overlayImages(p01, p1, p2 + overlapDisplacement, translation , maxCVal = maxCVal, imgC = imgC, imgs = imgs)
+    img, diff, pct, overlap = overlayImages(p01, p1, p2 + overlapDisplacement, imgC, imgs)
 
     print('p1 = ' + np.array_str(p1))
     print('p2 = ' + np.array_str(p2))
