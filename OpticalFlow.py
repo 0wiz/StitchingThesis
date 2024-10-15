@@ -1,29 +1,24 @@
-import resources.dic_tools as dicTool # type: ignore
+# Local
+import resources.dic_tools as flowTools # type: ignore
+
+# Math
 import numpy as np
 
-showFlow = False
-debug = False
-
-def OpticalFlow(image1, image2, ransac_tol=30, rollingWindowStepSize=25,
+def OpticalFlow(img1, img2, ransac_tol=30, rollingWindowStepSize=25,
                  windowSizeX=50, windowSizeY=50, extraWiggle=10, order=2):
-    global showFlow, debug
-    if debug:
-        showFlow = True
 
     print('Beginning Optical Flow')
-    bigPicDic, _, _ = dicTool.findBestDIC(image1, image2)
+    bigPicDic, _, _ = flowTools.findBestGPC(img1, img2)
     print('Overlap Found')
-    smallerDIC, _, _ = dicTool.findBestDIC(bigPicDic.image1_overlap, bigPicDic.image2_overlap)
+    smallerDIC, _, _ = flowTools.findBestGPC(bigPicDic.img1_overlap, bigPicDic.img2_overlap)
 
     print('Beginning Rolling Window')
-    smallerDIC.rollWindowInternallyAndDIC(rollingWindowStepSize, windowSizeX, windowSizeY, extraWiggle)
-    if debug:
-        dicTool.showInternalResults(smallerDIC)
+    smallerDIC.rollWindowAndFindBestGPC(rollingWindowStepSize, windowSizeX, windowSizeY, extraWiggle)
     smallerDIC.filterMissMatched(None, ransac_tol)
-    smallerDIC.doWarping(order, saveQuiver=False, showFigures=showFlow)
+    smallerDIC.warp(order)
     smallerDIC.optimizeWarping(order)
-    smallerDIC.doWarping(optimized=True, saveQuiver=False, showFigures=showFlow)
+    smallerDIC.warp(optimized=True)
     c = smallerDIC.OptimizeResult.x.reshape(smallerDIC.sUV0.shape)
-    c_dis = np.array([c[:,0], -c[:,1]])
+    c_dis = np.array([c[:,0], -c[:,1]]).T
     c_no_dis = np.zeros_like(c_dis)
     return c_dis, c_no_dis

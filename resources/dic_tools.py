@@ -1,4 +1,5 @@
 # Local
+import resources.image_interpolator as tools
 from resources.dic_Class import DicClass
 
 # Math
@@ -10,7 +11,7 @@ from scipy.ndimage import map_coordinates
 import cv2 as cv
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# Define the sets of Gradient-Processed Correlation to try
+# Define the sets of Gradient-Processed Correlation (GPC) to try
 combinations = [
     [False, False, False, False, False, False],
     [True, False, False, True, False, False], # I
@@ -68,321 +69,235 @@ combinations = [
     # [True, True, True, False, True, True], # IGGHH
     # [True, True, True, True, True, True], # IIGGHH
 ]
+cBarFrac = .045
 
-def padItUp(image1, image2, padType='edge'):
-    """
-    Pads two images to the same dimensions.
+"""
+Pads two images to the same dimensions.
 
-    Parameters:
-    image1 (numpy.ndarray): The first input image.
-    image2 (numpy.ndarray): The second input image.
+Parameters:
+    img1 (numpy.ndarray): The first input image.
+    img2 (numpy.ndarray): The second input image.
     padType (str): The padding type to use ('edge' or 'constant').
 
-    Returns:
-    tuple: A tuple containing the two padded images.
-    """
+Returns:
+    tuple: The two padded images.
+"""
+def padImages(img1, img2, padType='edge'):
     # Determine the maximum dimensions of the input images
-    max_height = np.max([image1.shape[0], image2.shape[0]])
-    max_width = np.max([image1.shape[1], image2.shape[1]])
+    max_height = np.max([img1.shape[0], img2.shape[0]])
+    max_width = np.max([img1.shape[1], img2.shape[1]])
     target_shape = (max_height, max_width)
 
     # Pad both images to the target shape
-    image1_padded = padImage(image1, target_shape, padType)
-    image2_padded = padImage(image2, target_shape, padType)
+    img1_padded = padImage(img1, target_shape, padType)
+    img2_padded = padImage(img2, target_shape, padType)
 
-    return image1_padded, image2_padded
+    return img1_padded, img2_padded
 
-def padImage(image, target_shape, padType='edge'):
-    """
-    Pads an image to the target shape.
+"""
+Pads an image to the target shape.
 
-    Parameters:
-    image (numpy.ndarray): The input image to be padded.
+Parameters:
+    img (numpy.ndarray): The input image to be padded.
     target_shape (tuple): The desired shape after padding (height, width).
     padType (str): The padding type to use ('edge' or 'constant').
 
-    Returns:
+Returns:
     numpy.ndarray: The padded image.
-    """
+"""
+def padImage(img, target_shape, padType='edge'):
     # Calculate padding amounts for each dimension
-    x_diff = target_shape[0] - image.shape[0]
-    y_diff = target_shape[1] - image.shape[1]
+    x_diff = target_shape[0] - img.shape[0]
+    y_diff = target_shape[1] - img.shape[1]
     
     # Determine the amount of padding needed on each side of the image
-    if x_diff % 2 == 0:
-        x_pad_before = x_diff // 2
-        x_pad_after = x_diff // 2
-    else:
-        x_pad_before = x_diff // 2
-        x_pad_after = x_diff // 2 + 1
-
-    if y_diff % 2 == 0:
-        y_pad_before = y_diff // 2
-        y_pad_after = y_diff // 2
-    else:
-        y_pad_before = y_diff // 2
-        y_pad_after = y_diff // 2 + 1
-
-    # Determine padding mode based on padType
-    if padType == 'edge':
-        pad_mode = 'edge'
-    else:
-        pad_mode = 'constant'
+    x_pad = (x_diff // 2, x_diff // 2 + (x_diff % 2 != 0))
+    y_pad = (y_diff // 2, y_diff // 2 + (y_diff % 2 != 0))
 
     # Pad the image symmetrically around its center using the specified padding mode
-    if len(image.shape) == 3:
-        padded_image = np.pad(image, ((x_pad_before, x_pad_after), (y_pad_before, y_pad_after), (0, 0)), mode=pad_mode)
+    if len(img.shape) == 3:
+        return np.pad(img, (x_pad, y_pad, (0,0)), mode=padType)
     else:
-        padded_image = np.pad(image, ((x_pad_before, x_pad_after), (y_pad_before, y_pad_after)), mode=pad_mode)
+        return np.pad(img, (x_pad, y_pad), mode=padType)
 
-    return padded_image
+"""
+Converts a color image to grayscale.
 
-def MakeGrayScale(image):
-    """
-    Converts a color image to grayscale.
+Parameters:
+    img1 (numpy.ndarray): The input image.
 
-    Parameters:
-    Image1 (numpy.ndarray): The input image.
-
-    Returns:
+Returns:
     numpy.ndarray: The grayscale image.
-    """
-    if (len(image.shape) >= 3):
-            image = 0.299*image[:,:,0] + 0.587*image[:,:,1] + 0.114*image[:,:,2]
-    return image
+"""
+def grayScale(img):
+    if (len(img.shape) >= 3):
+        img = .299*img[:,:,0] + .587*img[:,:,1] + .114*img[:,:,2]
+    return img
 
-def sobelItUpXY(Image):
-    """
-    Computes the horizontal and vertical gradients of an image using the Sobel operator.
+"""
+Computes the horizontal and vertical gradients of an image using the Sobel operator.
 
-    Parameters:
-    Image (numpy.ndarray): The input image.
+Parameters:
+    img (numpy.ndarray): The input image.
 
-    Returns:
+Returns:
     tuple: The horizontal and vertical gradients.
-    """
-    Image_bool = Image != 0
-    sobel_h_full = np.zeros_like(Image)
-    sobel_v_full = np.zeros_like(Image)
-    if (np.any(Image_bool)):
-            sobel_h = cv.Sobel(Image[np.where(np.any(Image_bool, axis=1))[0][0]:, np.where(np.any(Image_bool, axis=0))[0][0]:], ddepth=cv.CV_64F, ksize=-1, dx=1, dy=0).astype('float64') # horizontal gradient
-            sobel_v = cv.Sobel(Image[np.where(np.any(Image_bool, axis=1))[0][0]:, np.where(np.any(Image_bool, axis=0))[0][0]:], ddepth=cv.CV_64F, ksize=-1, dx=0, dy=1).astype('float64') # vertical gradient
-            sobel_h_full[np.where(np.any(Image_bool, axis=1))[0][0]:, np.where(np.any(Image_bool, axis=0))[0][0]:] = sobel_h
-            sobel_v_full[np.where(np.any(Image_bool, axis=1))[0][0]:, np.where(np.any(Image_bool, axis=0))[0][0]:] = sobel_v
+"""
+def sobelXY(img):
+    nonZeroRows, nonZeroCols = np.where(np.any(img, axis=0))[0], np.where(np.any(img, axis=1))[0]
+    sobel_h_full, sobel_v_full = np.zeros_like(img), np.zeros_like(img)
+    if (len(nonZeroRows) > 0):
+        sobel_h = cv.Sobel(img[nonZeroCols[0]:,nonZeroRows[0]:], ddepth=cv.CV_64F, ksize=-1, dx=1, dy=0).astype('float64') # horizontal gradient
+        sobel_v = cv.Sobel(img[nonZeroCols[0]:,nonZeroRows[0]:], ddepth=cv.CV_64F, ksize=-1, dx=0, dy=1).astype('float64') # vertical gradient
+        sobel_h_full[nonZeroCols[0]:,nonZeroRows[0]:] = sobel_h
+        sobel_v_full[nonZeroCols[0]:,nonZeroRows[0]:] = sobel_v
     return sobel_h_full, sobel_v_full
 
-def sobelItUp(Image):
-    """
-    Computes the gradient magnitude of an image using the Sobel operator.
+"""
+Preprocesses an image with optional gradient and Hessian computations.
 
-    Parameters:
-    Image (numpy.ndarray): The input image.
-
-    Returns:
-    numpy.ndarray: The gradient magnitude.
-    """
-    sobel_h, sobel_v = sobelItUpXY(Image)
-    magnitude = np.sqrt(sobel_h**2 + sobel_v**2)
-    if ~np.any(magnitude):
-            return np.zeros_like(Image)
-    return magnitude/np.max(magnitude)
-
-def doPreprocessing(image, calculateWithGrad, calculateWithHess, calculateWithImage, showResult=False):
-    """
-    Preprocesses an image with optional gradient and Hessian computations.
-
-    Parameters:
-    image (numpy.ndarray): The input image.
+Parameters:
+    img (numpy.ndarray): The input image.
     calculateWithGrad (bool): Whether to calculate the gradient.
     calculateWithHess (bool): Whether to calculate the Hessian.
     calculateWithImage (bool): Whether to use the original image in the final result.
     showResult (bool): Whether to display the result.
 
-    Returns:
+Returns:
     numpy.ndarray: The preprocessed image.
-    """
+"""
+def preprocess(img, calculateWithGrad, calculateWithHess, calculateWithImage, showResult=False):
     # Convert images to grayscale
-    image = MakeGrayScale(image)
-    image = image.astype(np.float64)
-    image /= np.max(image)
+    img = grayScale(img)
+    img = img.astype(np.float64)
+    img /= np.max(img)
 
-    imageCopy = image.copy()
+    imageCopy = img.copy()
 
     if calculateWithGrad:
-        imageGrad = sobelItUp(image)
+        sobel_h, sobel_v = sobelXY(img)
+        magnitude = np.sqrt(sobel_h**2 + sobel_v**2)
+        if ~np.any(magnitude):
+            imageGrad = np.zeros_like(img)
+        imageGrad = magnitude/np.max(magnitude)
     else:
-        imageGrad = np.ones_like(image)
+        imageGrad = np.ones_like(img)
     if calculateWithHess:
-        dx, dy = sobelItUpXY(image) # Compute gradients
-        imageHess = np.stack((*sobelItUpXY(dx), *sobelItUpXY(dy)), axis=-1)
+        dx, dy = sobelXY(img) # Compute gradients
+        imageHess = np.stack((*sobelXY(dx), *sobelXY(dy)), axis=-1)
         imageHess = np.sqrt(np.sum(imageHess**2, axis=-1))
         imageHess /= np.max(imageHess)
     else:
-        imageHess = np.ones_like(image)
+        imageHess = np.ones_like(img)
 
     if not calculateWithImage:
-        image = np.ones_like(image)
+        img = np.ones_like(img)
 
     if showResult:
-        _ ,axs = plt.subplots(4, 1, figsize=(20, 30))
-        axs[0].set_title('Pure Images')
-        axs[0].imshow(imageCopy)
-        axs[1].set_title('Grad Images')
-        axs[1].imshow(imageGrad)
-        axs[2].set_title('Hess Images')
-        axs[2].imshow(imageHess)
-        axs[3].set_title('Image to be correlated')
-        axs[3].imshow(image)
+        _, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(20, 30))
+        ax1.set_title('Pure Images')
+        ax1.imshow(imageCopy)
+        ax2.set_title('Grad Images')
+        ax2.imshow(imageGrad)
+        ax3.set_title('Hess Images')
+        ax3.imshow(imageHess)
+        ax4.set_title('Image to be correlated')
+        ax4.imshow(img)
             
-    return image*(imageGrad*imageHess)
+    return img*(imageGrad*imageHess)
 
-def doCorrAndBringBack(Image1, Image2):
-    """
-    Computes the normalized correlation between two images and reverses the correlation.
+"""
+Pads two images and returns padded copies.
 
-    Parameters:
-    Image1 (numpy.ndarray): The first input image.
-    Image2 (numpy.ndarray): The second input image.
-
-    Returns:
-    numpy.ndarray: The correlation result.
-    """
-    norm_corr = doZeroMeanNormCorr(Image1, Image2)
-    return reverseCorr(norm_corr)
-
-def doPaddingAndGetCopies(Image1, Image2, padType): 
-    """
-    Pads two images and returns padded copies.
-
-    Parameters:
-    Image1 (numpy.ndarray): The first input image.
-    Image2 (numpy.ndarray): The second input image.
+Parameters:
+    img1 (numpy.ndarray): The first input image.
+    img2 (numpy.ndarray): The second input image.
     padType (str): The padding type to use ('edge' or 'constant').
 
-    Returns:
+Returns:
     tuple: The padded images.
-    """
-    Image1, Image2 = padItUp(Image1, Image2, padType)
-    Image1 = padImage(Image1, (Image1.shape[0]*2, Image1.shape[1]*2), padType)
-    Image2 = padImage(Image2, (Image2.shape[0]*2, Image2.shape[1]*2), padType)
-    return Image1, Image2
+"""
+def getPaddedCopies(img1, img2, padType):
+    img1, img2 = padImages(img1, img2, padType)
+    img1 = padImage(img1, (img1.shape[0]*2, img1.shape[1]*2), padType)
+    img2 = padImage(img2, (img2.shape[0]*2, img2.shape[1]*2), padType)
+    return img1, img2
 
-def doDIC(Image1Pure:np.ndarray, Image2Pure:np.ndarray, showCorrelation=False, 
-           showResult=False, divPosx=-1, divPosy=-1, circVal=-1, padError=0,
-             showPadError=False, save_images=False, useGradCorrelation=False, 
-             useHessCorrelation=False, useImageCorrelation=False, useImageAsPreProcess=True, useGradAsPreProcess=False, 
-             useHessAsPreProcess=False, padType='edge'):
-    """
-    Performs Digital Image Correlation (DIC) on two images.
+"""
+Performs Digital Image Correlation (DIC) on two images.
 
-    Parameters:
-    Image1Pure (numpy.ndarray): The first input image.
-    Image2Pure (numpy.ndarray): The second input image.
-    showCorrelation (bool): Whether to display the correlation map.
-    showResult (bool): Whether to display the result.
+Parameters:
+    img1Pure (numpy.ndarray): The first input image.
+    img2Pure (numpy.ndarray): The second input image.
     divPosx (int): X-division position for DIC.
     divPosy (int): Y-division position for DIC.
     circVal (int): Circular value for the DIC.
-    padError (int): Padding error margin.
-    showPadError (bool): Whether to show padding error.
-    save_images (bool): Whether to save intermediate images.
-    useGradCorrelation (bool): Whether to calculate with gradient.
-    useHessCorrelation (bool): Whether to calculate with Hessian.
-    useImageCorrelation (bool): Whether to calculate with Hessian.
-    useImageAsPreProcess (bool): Whether to use the original image in the final result.
-    useGradAsPreProcess (bool): Whether to merge image with gradient.
-    useHessAsPreProcess (bool): Whether to merge image with Hessian.
+    gradCorr (bool): Whether to calculate with gradient.
+    hessCorr (bool): Whether to calculate with Hessian.
+    imgCorr (bool): Whether to calculate with Hessian.
+    imgProd (bool): Whether to use the original image in the final result.
+    gradProd (bool): Whether to merge image with gradient.
+    hessProd (bool): Whether to merge image with Hessian.
     padType (str): The padding type to use ('edge' or 'constant').
 
-    Returns:
+Returns:
     tuple: Displacement coordinate, X and Y
     displacement statistics
     merged image
     figure
-    """
+"""
+def computeDIC(img1Pure:np.ndarray, img2Pure:np.ndarray, gradCorr=False, hessCorr=False, imgCorr=False, imgProd=True, gradProd=False, hessProd=False, padType='edge', divPosx=-1, divPosy=-1, circVal=-1):
+    #####################################################################################################
+    #                                           Calculations                                            #
+    #####################################################################################################
 
-    Image1copy = MakeGrayScale(Image1Pure.copy())
-    Image2copy = MakeGrayScale(Image2Pure.copy())
+    img1Gray = grayScale(img1Pure.copy())
+    img2Gray = grayScale(img2Pure.copy())
     iterations = 1
 
-    if showResult:
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 10))
-            fig.suptitle('Initial Images')
-            ax1.imshow(Image1Pure)
-            ax2.imshow(Image2Pure)
-
-
-    if (len(Image1Pure.shape) == 3):
-            iterations = 3
+    if (len(img1Pure.shape) == 3):
+        iterations = 3
     for i in range(iterations):
-            Image1 = Image1Pure[:,:,i].copy().astype(np.float64)
-            Image2 = Image2Pure[:,:,i].copy().astype(np.float64)
+        img1 = img1Pure[:,:,i].copy().astype(np.float64)
+        img2 = img2Pure[:,:,i].copy().astype(np.float64)
 
-            Image1 /= np.max(Image1)
-            Image2 /= np.max(Image2)
-            
-            # Check if padError is provided as an array
-            showPadError = showPadError and type(padError) != type(0)
-            
-            Image1 = doPreprocessing(Image1, useGradAsPreProcess, useHessAsPreProcess, useImageAsPreProcess, False)
-            Image2 = doPreprocessing(Image2, useGradAsPreProcess, useHessAsPreProcess, useImageAsPreProcess, False)
+        img1 /= np.max(img1)
+        img2 /= np.max(img2)
+        
+        img1 = preprocess(img1, gradProd, hessProd, imgProd, False)
+        img2 = preprocess(img2, gradProd, hessProd, imgProd, False)
 
-            Image1_grad = doPreprocessing(Image1,True,False,False,False)
-            Image2_grad = doPreprocessing(Image2,True,False,False,False)
+        img1Grad = preprocess(img1, True, False, False, False)
+        img2Grad = preprocess(img2, True, False, False, False)
 
-            Image1_hess = doPreprocessing(Image1,False,True,False,False)
-            Image2_hess = doPreprocessing(Image2,False,True,False,False)
+        img1Hess = preprocess(img1, False, True, False, False)
+        img2Hess = preprocess(img2, False, True, False, False)
 
-            Image1, Image2 = doPaddingAndGetCopies(Image1, Image2, padType)
-            Image1, Image1copy = padItUp(Image1, Image1copy, padType)
-            Image2, Image2copy = padItUp(Image2, Image2copy, padType)
-            Image1_grad, Image2_grad = doPaddingAndGetCopies(Image1_grad, Image2_grad,padType)
-            Image1_hess, Image2_hess = doPaddingAndGetCopies(Image1_hess, Image2_hess,padType)
+        img1, img2 = getPaddedCopies(img1, img2, padType)
+        img1, img1Gray = padImages(img1, img1Gray, padType)
+        img2, img2Gray = padImages(img2, img2Gray, padType)
+        img1Grad, img2Grad = getPaddedCopies(img1Grad, img2Grad, padType)
+        img1Hess, img2Hess = getPaddedCopies(img1Hess, img2Hess, padType)
 
-            if i == 0:
-                real_corr = np.ones_like(Image1.copy()).astype(np.complex128)
+        if i == 0:
+            real_corr = np.ones_like(img1.copy()).astype(np.complex128)
+        
+        # Compute normalized correlations
+        reverseCorrelation = lambda img1, img2: np.fft.ifftshift(np.fft.ifftn(ZONCC(img1, img2)))
 
-            # Compute normalized correlations
-            if useImageCorrelation:
-                real_corr *= doCorrAndBringBack(Image1, Image2)
-            if useGradCorrelation:
-                real_corr *= doCorrAndBringBack(Image1_grad, Image2_grad)
-            if useHessCorrelation:
-                real_corr *= doCorrAndBringBack(Image1_hess, Image2_hess)
-    
+        # Compute normalized correlations
+        if imgCorr:
+            real_corr *= reverseCorrelation(img1, img2)
+        if gradCorr:
+            real_corr *= reverseCorrelation(img1Grad, img2Grad)
+        if hessCorr:
+            real_corr *= reverseCorrelation(img1Hess, img2Hess)
     real_corr = np.abs(real_corr)
-    (delta_x, delta_y), findmax, merged, fig = plot_dic_plots(Image1, Image1copy, Image2copy, real_corr, showCorrelation, showResult, showPadError, divPosx, divPosy, circVal, padError, save_images)
 
-    # Return displacement, displacement statistics, merged image, and figure (if required)
-    return (-delta_x, -delta_y), np.max(np.abs(findmax)), findmax, merged, fig if (showCorrelation or showResult) else None
-
-
-def plot_dic_plots(Image1, Image1copy, Image2copy, real_corr, showCorrelation, showResult, showPadError, divPosx, divPosy, circVal, padError, save_images=False):
-    """
-    Generate and display DIC (Digital Image Correlation) plots including correlation maps,
-    displacement calculation, and merged images with optional display configurations.
-
-    Parameters:
-    - Image1 (numpy.ndarray): Reference image for correlation.
-    - Image1copy (numpy.ndarray): Copy of the reference image.
-    - Image2copy (numpy.ndarray): Copy of the target image for correlation.
-    - real_corr (numpy.ndarray): 2D array representing the correlation coefficients.
-    - showCorrelation (bool): Flag to display the correlation map.
-    - showResult (bool): Flag to display the resulting merged image.
-    - showPadError (bool): Flag to display padding errors.
-    - divPosx (int): X-coordinate position for correlation search.
-    - divPosy (int): Y-coordinate position for correlation search.
-    - circVal (int): Radius of the circular area around the maximum correlation point.
-    - padError (numpy.ndarray): Padding error array for visualization.
-    - save_images (bool): Flag to save the plots instead of displaying them.
-
-    Returns:
-    - Tuple containing:
-      - (delta_x, delta_y) (tuple of ints): Displacement in x and y directions.
-      - findmax (numpy.ndarray): Array representing the highest correlation region.
-      - merged (numpy.ndarray): Merged image showing Image1 and Image2 positions.
-      - fig (matplotlib.figure.Figure or None): Figure object if plots were generated, None otherwise.
-    """
+    #####################################################################################################
+    #                                             Plotting                                              #
+    #####################################################################################################
+    
     # Find maximum correlation
     shouldShowWholeCorrelation = divPosx < 0 or divPosy < 0 or circVal < 0
     corrXleft = np.max([divPosx - circVal, 0])
@@ -400,38 +315,6 @@ def plot_dic_plots(Image1, Image1copy, Image2copy, real_corr, showCorrelation, s
 
     DIC_pos = np.unravel_index(np.argmax(findmax, axis=None), findmax.shape)
     
-    # Plotting setup
-    if showCorrelation:
-        if showResult and showPadError:
-            print(DIC_pos)
-            fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(Image1.shape[0] / 85, Image1.shape[1] / 85))
-        elif showResult or showPadError:
-            print(DIC_pos)
-            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 20))
-        else:
-            fig, ax1 = plt.subplots(1, 1, figsize=(Image1.shape[0] / 85, Image1.shape[1] / 85))
-    elif showResult:
-        print(DIC_pos)
-        fig, ax1 = plt.subplots(1, 1, figsize=(Image1.shape[0] / 85, Image1.shape[1] / 85))
-
-    # Plot correlation map
-    if showCorrelation:
-        ax1.set_title('Corr map, log\'ed')
-        pcm = ax1.pcolormesh(np.log(np.abs(real_corr[:,::-1])))
-        fig.colorbar(pcm, ax=ax1)
-        ax1.plot(real_corr.shape[1] - DIC_pos[1], DIC_pos[0], 'r.')
-        if not shouldShowWholeCorrelation:
-            ax1.plot(divPosy, real_corr.shape[0] - divPosx, 'r*')
-            ax1.plot(corrYdown, real_corr.shape[0] - corrXright, 'ko')
-            ax1.plot(corrYdown, real_corr.shape[0] - corrXleft, 'bo')
-            ax1.plot(corrYup, real_corr.shape[0] - corrXright, 'go')
-            ax1.plot(corrYup, real_corr.shape[0] - corrXleft, 'yo')
-        if showPadError:
-            ax2.set_title('Pad_error')
-            real_pad_error = np.fft.ifftshift(np.fft.ifft2(padError))
-            pcm2 = ax2.pcolormesh(np.abs(real_pad_error[:, ::-1]))
-            fig.colorbar(pcm2, ax=ax2)
-
     # Calculate displacement in x and y directions
     delta_x = DIC_pos[0] - real_corr.shape[0] // 2
     delta_y = real_corr.shape[1]// 2 - DIC_pos[1]
@@ -439,58 +322,32 @@ def plot_dic_plots(Image1, Image1copy, Image2copy, real_corr, showCorrelation, s
     # Create merged image
     merged = np.zeros((real_corr.shape[0] + 2 * abs(delta_x), real_corr.shape[1] + 2 * abs(delta_y)))
 
-    # Copy Image2 to appropriate position in the merged image
-    merged[abs(delta_x):abs(delta_x)+real_corr.shape[0], abs(delta_y):abs(delta_y)+real_corr.shape[1]] = Image2copy
+    # Copy image 2 to appropriate position in the merged image
+    merged[abs(delta_x):abs(delta_x)+real_corr.shape[0], abs(delta_y):abs(delta_y)+real_corr.shape[1]] = img2Gray
 
-    # Adjust position and add Image1 to the merged image
+    # Adjust position and add image 1 to the merged image
     merged[abs(delta_x)-delta_x:abs(delta_x)-delta_x+real_corr.shape[0],
-           abs(delta_y)+delta_y:abs(delta_y)+delta_y+real_corr.shape[1]] -= padImage(Image1copy, real_corr.shape, 'constant')
+           abs(delta_y)+delta_y:abs(delta_y)+delta_y+real_corr.shape[1]] -= padImage(img1Gray, real_corr.shape, 'constant')
     merged = np.abs(merged)
 
-    # Plot merged image
-    if showResult:
-        print((delta_x, delta_y))
-        if showCorrelation and showPadError:
-            ax3.set_title('Merged image')
-            ax3.imshow(merged)
-            ax3.plot([real_corr.shape[1] / 2 + abs(delta_y) + delta_y], [real_corr.shape[0] / 2 + abs(delta_x) - delta_x], 'bo')
-            ax3.plot([real_corr.shape[1] / 2 + abs(delta_y)], [real_corr.shape[0] / 2 + abs(delta_x)], 'ro')
-        elif showCorrelation:
-            ax2.set_title('Merged image')
-            ax2.imshow(merged)
-            line1, =ax2.plot([real_corr.shape[1] / 2 + abs(delta_y) + delta_y], [real_corr.shape[0] / 2 + abs(delta_x) - delta_x], 'bo', label='Image 1')
-            line2, =ax2.plot([real_corr.shape[1] / 2 + abs(delta_y)], [real_corr.shape[0] / 2 + abs(delta_x)], 'ro', label='Image 2')
-            ax2.legend(handles=[line1, line2])
-        else:
-            ax1.set_title('Merged image')
-            ax1.imshow(merged)
-            line1, = ax1.plot([real_corr.shape[1] / 2 + abs(delta_y) + delta_y], [real_corr.shape[0] / 2 + abs(delta_x) - delta_x], 'bo', label='Image 1')
-            line2, = ax1.plot([real_corr.shape[1] / 2 + abs(delta_y)], [real_corr.shape[0] / 2 + abs(delta_x)], 'ro', label='Image 2')
-            ax1.legend(handles=[line1, line2])
+    # Return displacement, displacement statistics, merged image, and figure (if required)
+    return (-delta_x, -delta_y), findmax, merged
 
-    # Show or save the plot
-    if (showCorrelation or showResult) and not save_images:
-        plt.show()
-    else:
-        plt.close()
-    
-    return (delta_x, delta_y), findmax, merged, fig if (showCorrelation or showResult) else None
+"""
+Computes the zero mean normalized cross-correlation of two images.
 
-def doZeroMeanNormCorr(Image1, Image2):
-    """
-    Computes the zero mean normalized cross-correlation of two images.
+Parameters:
+    img1 (numpy.ndarray): The first input image.
+    img2 (numpy.ndarray): The second input image.
 
-    Parameters:
-    image1 (numpy.ndarray): The first input image.
-    image2 (numpy.ndarray): The second input image.
-
-    Returns:
+Returns:
     numpy.ndarray: The normalized correlation result.
-    """
-    Image1, Image2 = padItUp(Image1, Image2)
+"""
+def ZONCC(img1, img2):
+    img1, img2 = padImages(img1, img2)
 
-    ftImage1 = np.fft.fftshift(np.fft.fftn(Image1))
-    ftImage2 = np.fft.fftshift(np.fft.fftn(Image2))
+    ftImage1 = np.fft.fftshift(np.fft.fftn(img1))
+    ftImage2 = np.fft.fftshift(np.fft.fftn(img2))
 
     ftImage1 -= np.mean(ftImage1)
     ftImage2 -= np.mean(ftImage2)
@@ -499,33 +356,33 @@ def doZeroMeanNormCorr(Image1, Image2):
     corr /= np.max(np.abs(corr))
     return (corr/np.abs(corr))
 
-def overlapRegion(image1, image2, delta_x, delta_y):
-    """
-    Returns the overlap region of two images.
+"""
+Returns the overlap region of two images.
+
+Parameters:
+    img1 (2D array): The first input image.
+    img2 (2D array): The second input image.
+    delta_x (int): The horizontal displacement between the two images.
+    delta_y (int): The vertical displacement between the two images.
     
-    Parameters:
-        image1 (2D array): The first input image.
-        image2 (2D array): The second input image.
-        delta_x (int): The horizontal displacement between the two images.
-        delta_y (int): The vertical displacement between the two images.
-        
-    Returns:
-        overlap1 (2D array): Overlapping region of image1.
-        overlap2 (2D array): Overlapping region of image2.
-    """         
-    image1, image2 = padItUp(image1+1, image2+1, 'constant')
-    height1, width1 = image1.shape[:2]
-    height2, width2 = image2.shape[:2]
+Returns:
+    overlap1 (2D array): Overlapping region of img1.
+    overlap2 (2D array): Overlapping region of img2.
+"""   
+def getOverlap(img1, img2, delta_x, delta_y):      
+    img1, img2 = padImages(img1+1, img2+1, 'constant')
+    height1, width1 = img1.shape[:2]
+    height2, width2 = img2.shape[:2]
     
     # Calculate the overlap region coordinates
     start_x = np.max([0, delta_x])
-    end_x = np.min([width1, width2 + delta_x])
+    end_x = np.min([width1, width2+delta_x])
     start_y = np.max([0, delta_y])
-    end_y = np.min([height1, height2 + delta_y])
+    end_y = np.min([height1, height2+delta_y])
     
     # Extract the overlap region from both images
-    overlap1 = image1[start_y:end_y,start_x:end_x]
-    overlap2 = image2[start_y-delta_y:end_y-delta_y,start_x-delta_x:end_x-delta_x]
+    overlap1 = img1[start_y:end_y,start_x:end_x]
+    overlap2 = img2[start_y-delta_y:end_y-delta_y,start_x-delta_x:end_x-delta_x]
 
     bool1 = overlap1 > 0
     bool2 = overlap2 > 0
@@ -539,146 +396,75 @@ def overlapRegion(image1, image2, delta_x, delta_y):
     
     return overlap1-1, overlap2-1
 
-def reverseCorr(corr):
-    return np.fft.ifftshift(np.fft.ifftn(corr))
+def interpolateQuiver(X, Y, UV, order=3): # TODO: Integrate into class if unaffected is removed
+    basis = tools.polyBasis2D(Y.ravel(), X.ravel(), order)
+    sUV = np.linalg.lstsq(np.vstack(np.array([basis])).T, np.array([UV[1].ravel(),UV[0].ravel()]).T, rcond=None)[0]
+    return sUV
 
-def interpolateQuiver(X, Y, UV, order=3):
-       x = X.ravel()
-       y = Y.ravel()
+"""
+Warp an image according to given displacement fields using piecewise polynomials (splines).
 
-       U = UV[1]
-       V = UV[0]
+Parameters:
+    img (numpy.ndarray): Input image array of shape (height, width, channels)
+    disp_x (numpy.ndarray): Displacement field for X direction, shape (height, width)
+    disp_y (numpy.ndarray): Displacement field for Y direction, shape (height, width)
 
-       basis = getBasis(y, x, order)
-       A = np.vstack(np.array([basis])).T
-       
-       sUV = np.linalg.lstsq(A, np.array([U.ravel(),V.ravel()]).T, rcond=None)[0]
-       return sUV,basis
-
-def getBasis(x, y, max_order=4):
-    """Return the fit basis polynomials: 1, x, x^2, ..., xy, x^2y, ... etc."""
-    basis = []
-    for i in range(max_order+1):
-        for j in range(max_order - i +1):
-            basis.append(x**j * y**i)
-    return basis
-
-def getFit(X, Y, poly:np.ndarray, basis=None, o=3):
-    """
-    Fits a polynomial model to the given data using a basis function.
-
-    Parameters:
-    X (numpy.ndarray): The input data for the independent variable.
-    Y (numpy.ndarray): The input data for the dependent variable.
-    poly (numpy.ndarray): Coefficients of the polynomial to be fitted, where each row corresponds to polynomial coefficients for a different term.
-    basis (callable, optional): The fit basis polynomials: 1, x, x^2, ..., xy, x^2y, ... etc.
-    o (int, optional): The order of the polynomial if `getBasis` is used. Default is 3.
-
-    Returns:
-    tuple: A tuple containing:
-        - U (numpy.ndarray): The fitted U values reshaped to the shape of X.
-        - V (numpy.ndarray): The fitted V values reshaped to the shape of X.
-    """
-    x = X.ravel()
-    y = Y.ravel()
-    polyU = poly[:,0]
-    polyV = poly[:,1]
-    if basis is None:
-        basis = np.array(getBasis(x, y, o))
-    U = polyU @ basis
-    V = polyV @ basis
-    U = U.reshape(*X.shape)
-    V = V.reshape(*X.shape)
-    return U,V
-
-def imageError(oldDis, newDis):
-    """
-    Computes the mean error between the old displacements and the new displacements.
-
-    Parameters:
-    oldDis (numpy.ndarray): The array of original displacements.
-    newDis (numpy.ndarray): The array of new displacements.
-
-    Returns:
-    float: The mean error computed as the mean norm of the difference between old and new displacements.
-    """
-    return np.mean(np.linalg.norm(oldDis - newDis, axis = 0))
-
-def warp_image(image, disp_x, disp_y):
-    """
-    Warp an image according to given displacement fields.
-
-    Args:
-    - image (numpy.ndarray): Input image array of shape (height, width, channels)
-    - disp_x (numpy.ndarray): Displacement field for X direction, shape (height, width)
-    - disp_y (numpy.ndarray): Displacement field for Y direction, shape (height, width)
-
-    Returns:
-    - warped_image (numpy.ndarray): Warped image array of shape (height, width, channels)
-    """
-    height, width, channels = image.shape
+Returns:
+    warped_image (numpy.ndarray): Warped image array of shape (height, width, channels)
+"""
+def warpToFieldPiecewise(img, disp_x, disp_y):
+    height, width, channels = img.shape
 
     # Generate grid coordinates
     y_coords, x_coords = np.meshgrid(np.arange(height), np.arange(width), indexing='ij')
 
     # Add displacement and clip to stay within image boundaries
-    displaced_coords_x = np.clip(x_coords + disp_x, 0, width - 1)
-    displaced_coords_y = np.clip(y_coords + disp_y, 0, height - 1)
+    displaced_coords_x = np.clip(x_coords+disp_x, 0, width-1)
+    displaced_coords_y = np.clip(y_coords+disp_y, 0, height-1)
 
     # Stack displaced coordinates
     displaced_coords = np.stack((displaced_coords_y, displaced_coords_x), axis=-1)
 
     # Interpolate image values at displaced coordinates
-    warped_image = np.zeros_like(image)
+    warped_image = np.zeros_like(img)
     for c in range(channels):
         # Transpose and reshape the coordinate array
         coords = displaced_coords.reshape((height * width, 2)).T
-        # Interpolate image values at displaced coordinates
-        warped_channel = map_coordinates(image[..., c], coords, order=5, mode='constant', cval=0)
+        # Interpolate image values at displaced coordinates using Scipy's spline-based interpolator
+        warped_channel = map_coordinates(img[..., c], coords, order=5, mode='constant', cval=0)
          # Reshape the interpolated values back to image shape
         warped_image[..., c] = warped_channel.reshape((height, width))
 
     return warped_image
 
-def showAndCompareWarped(image1:np.ndarray, image2:np.ndarray, warpedImage):
-    """
-    Displays and compares the reference, warped, and original images.
+"""
+Displays and compares the reference, warped, and original images.
 
-    Parameters:
-    image1 (numpy.ndarray): The first input image (original image).
-    image2 (numpy.ndarray): The second input image (reference image).
+Parameters:
+    img1 (numpy.ndarray): The first input image (original image).
+    img2 (numpy.ndarray): The second input image (reference image).
     warpedImage (numpy.ndarray): The warped version of the first input image.
-
-    Returns:
-    Void
-    """
-    im1, im2 = padItUp(image2,warpedImage, padType='constant')
-    plt.figure(figsize=(10, 10))
-    plt.imshow(im1[:,:,0])
-    plt.title('Reference Image')
-    plt.figure(figsize=(10, 10))
-    plt.imshow(im2[:,:,0])
-    plt.title('Warped Image')
-    plt.figure(figsize=(10, 10))
+"""
+def showWarpComparison(img1:np.ndarray, img2:np.ndarray, warpedImage):
+    im1, im2 = padImages(img2, warpedImage, 'constant')
+    _, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(20, 20))
+    ax1.imshow(im1[:,:,0]); ax1.set_axis_off(); ax1.set_title('Reference Image')
+    ax2.imshow(im2[:,:,0]); ax2.set_axis_off(); ax2.set_title('Warped Image')
 
     im1_bool = im1 != 0
     im2_bool = im2 != 0
     use_bool = im1_bool if im2_bool.sum() > im1_bool.sum() else im2_bool
-    cMax = 255 if (isinstance(im1[0], int)) else 1
-    plt.title('New diff : $|I_{ref} - I_{warp}|$ = ' + str(np.mean(np.abs((im1[use_bool]/cMax)-(im2[use_bool]/cMax)))))
-    newDiff = (0.5*im2+0.5*im1)/np.max(np.abs(0.5*im2+0.5*im1))
-    plt.imshow(newDiff)
-    plt.show()
+    maxC = tools.maxC if (isinstance(im1[0], int)) else 1
+    newDiff = (im1+im2) / np.max(np.abs(im1+im2))
+    ax3.imshow(newDiff); ax3.set_axis_off()
+    ax3.set_title('New diff: $|I_{ref} - I_{warp}|$ = %.5f' % np.mean(np.abs((im1[use_bool]/maxC)-(im2[use_bool]/maxC))))
 
-    im3, im4 = padItUp(image1, image2, 'constant')
-    im3_bool = im3 != 0
-    im4_bool = im4 != 0
+    im3, im4 = padImages(img1, img2, 'constant')
+    im3_bool, im4_bool = im3 != 0, im4 != 0
     use_bool = im4_bool if im3_bool.sum() > im4_bool.sum() else im3_bool
-    plt.figure(figsize=(10, 10))
-    plt.title('Original : $|I_{ref} - I_{org}|$ = ' + str(np.mean(np.abs((im3[use_bool]/cMax)-(im4[use_bool]/cMax)))))
-    orgDiff = (0.5*im3+0.5*im4)/np.max(np.abs(0.5*im3+0.5*im4))
-    plt.imshow(orgDiff)
-    plt.show()
+    orgDiff = (im3+im4) / np.max(np.abs(im3+im4))
+    ax4.imshow(orgDiff); ax4.set_axis_off()
+    ax4.set_title('Original: $|I_{ref} - I_{org}|$ = %.5f' % np.mean(np.abs((im3[use_bool]/maxC)-(im4[use_bool]/maxC))))
 
 def findTriangle(number, i=[0], j=1, restart=True):
     if restart:
@@ -692,437 +478,195 @@ def findTriangle(number, i=[0], j=1, restart=True):
 def mapOldOrderToNewOrder(cOld, oldOrder, newOrder):
     y = np.array([[0,0,0],[1,1,1],[2,2,2]])
     x = np.array([[0,1,2],[0,1,2],[0,1,2]])
-    basisOld = getBasis(x, y, oldOrder)
-    basisNew = getBasis(x, y, newOrder)
-    cNew = np.zeros((len(basisNew)))
+    basisOld = tools.polyBasis2D(x, y, oldOrder)
+    basisNew = tools.polyBasis2D(x, y, newOrder)
+    cNew = np.zeros(len(basisNew))
     for i,baseOld in enumerate(basisOld):
         for j,baseNew in enumerate(basisNew):
             if np.all(baseOld == baseNew):
                 cNew[j] = cOld[i]
-                break 
+                break
     return cNew
 
-def error_minimization(UV, dicClass, o, uvShape):
-    """
-    Minimizes the error between the given displacements and the fitted displacements.
+"""
+Minimizes the error between the given displacements and the fitted displacements.
 
-    Parameters:
+Parameters:
     UV (numpy.ndarray): The array of displacements to be reshaped and fitted.
     dicClass (object): An object containing displacement coordinates and internal displacement data.
-    o (int): The order of the polynomial for fitting.
+    order (int): The order of the polynomial for fitting.
     basis (callable): A basis function to apply to the input data.
     uvShape (tuple): The shape to reshape the UV array into.
 
-    Returns:
+Returns:
     float: The error between the internal displacement and the fitted displacement.
-    """
+"""
+def error_minimization(UV, dicClass, order, uvShape):
     UV = np.reshape(UV, uvShape)
-    U,V = getFit(dicClass.discplacementsCoordinates[1], dicClass.discplacementsCoordinates[0], UV, o = o)
-    return (imageError(np.array([dicClass.internalDisplacement[0],dicClass.internalDisplacement[1]]), 
-                       np.array([V, U])))
+    U, V = tools.polyFit2D(dicClass.discplacementsCoordinates[1], dicClass.discplacementsCoordinates[0], UV, order=order)
+    return np.mean(np.linalg.norm(np.array([dicClass.internalDisplacement[0],dicClass.internalDisplacement[1]])-np.array([V, U]), axis=0))
 
+"""
+Minimizes the error between the given displacements and the fitted displacements.
 
-def error_minimizationUnaffected(UV, dicClass, o, uvShape):
-    """
-    Minimizes the error between the given displacements and the fitted displacements.
-
-    Parameters:
+Parameters:
     UV (numpy.ndarray): The array of displacements to be reshaped and fitted.
     dicClass (object): An object containing displacement coordinates and internal displacement data.
-    o (int): The order of the polynomial for fitting.
+    order (int): The order of the polynomial for fitting.
     basis (callable): A basis function to apply to the input data.
     uvShape (tuple): The shape to reshape the UV array into.
 
-    Returns:
+Returns:
     float: The error between the internal displacement and the fitted displacement.
-    """
+"""
+def error_minimizationUnaffected(UV, dicClass, order, uvShape):
     UV = np.reshape(UV, uvShape)
-    U,V = getFit(dicClass.discplacementsCoordinatesUnaffected[1], dicClass.discplacementsCoordinatesUnaffected[0], UV, o = o)
-    return (imageError(np.array([dicClass.internalDisplacementUnaffected[0],dicClass.internalDisplacementUnaffected[1]]), 
-                       np.array([V, U])))
+    U, V = tools.polyFit2D(dicClass.discplacementsCoordinatesUnaffected[1], dicClass.discplacementsCoordinatesUnaffected[0], UV, order=order)
+    return np.mean(np.linalg.norm(np.array([dicClass.internalDisplacementUnaffected[0],dicClass.internalDisplacementUnaffected[1]])-np.array([V, U]), axis=0))
 
-def findBestDIC(image1, image2, a=0):
-    def process_combination(i, comb):
+def findBestGPC(img1, img2, best=None):
+    # Define Gradient-Processed Correlation (GPC)
+    def GPC(iteration, combination):
         try:
-            if not np.any(comb):
-                print('Combination #%d failed' %i)
+            if not np.any(combination):
                 return None, None, None
-            innerDIC = DicClass(showDicResults=False, showDicCorrelation=False,
-                                        useImageAsPreProcess=comb[0],
-                                        useGradAsPreProcess=comb[1],
-                                        useHessAsPreProcess=comb[2],
-                                        useImageCorrelation=comb[3],
-                                        useGradCorrelation=comb[4],
-                                        useHessCorrelation=comb[5])
-            innerDIC.defineImage1(image1)
-            innerDIC.defineImage2(image2)
-            innerDIC.doSimpleExposureAdjustment()
-            innerDIC.doInternalDIC()
-            innerDIC.setOverlappingImages()
-
-            innerDIC_bool = innerDIC.overlap_quality != 0
-            return (innerDIC, i, innerDIC_bool)
+            dic = DicClass(combination)
+            dic.defineImages(img1, img2)
+            dic.adjustExposure()
+            dic.calculate()
+            dic.findOverlap()
+            return dic, iteration, dic.overlap_quality != 0
         except:
-            print('Combination #%d failed' %i)
+            print('Combination #%d failed' % iteration)
             return None, None, None
 
     with ThreadPoolExecutor() as executor:
-        futures = [executor.submit(process_combination, i, comb) for i, comb in enumerate(combinations)]
-        chosen_combo = None
+        best_i, abs_diff = 0, 0
 
-        for future in as_completed(futures):
-            innerDIC, i, innerDIC_bool = future.result()
+        for f in as_completed([executor.submit(GPC, i, c) for i,c in enumerate(combinations)]):
+            dic, i, dic_bool = f.result()
 
-            if innerDIC is None:
-                continue
+            if dic is not None:
+                if best is None:
+                    quality_diff = 0
+                else:
+                    quality_diff = np.mean(best.overlap_quality[best.overlap_quality != 0]) - np.mean(dic.overlap_quality[dic_bool])
 
-            if type(a) is not int:
-                a_bool = a.overlap_quality != 0
-            if type(a) is int: 
-                overlap_quality_diff = 0
-            else:
-                overlap_quality_diff = np.mean(a.overlap_quality[a_bool]) - np.mean(innerDIC.overlap_quality[innerDIC_bool])
-            if type(a) is int or overlap_quality_diff > 0:
-                a = innerDIC
-                chosen_combo = i
-                abs_diff = np.abs(overlap_quality_diff)
+                if best is None or quality_diff > 0:
+                    best = dic
+                    best_i = i
+                    abs_diff = quality_diff
 
-    executor.shutdown()
-    if a == 0:
-        return a, combinations[0], 0
+        executor.shutdown()
+    return best, combinations[best_i], abs_diff
 
-    return a, combinations[chosen_combo], abs_diff
+def getInternalReport(dicObject, showZeros=False):
+    zeros = np.sum(~dicObject.chosenComboMat[np.sum(dicObject.chosenComboMat, axis=-1) == 0,0])
+    print('Total Combinations=%d' % (dicObject.chosenComboMat.size // 6))
+    print('Zeros  | NoGradientProcessing=%d' % zeros)
 
-def getInternalReport(dicObject, saveFig=False, showZeros=False):
-        print('-------------total-------------')
-        print('total: %d' %(dicObject.chosenComboMat.size//6))
+    twosies = np.sum(dicObject.chosenComboMat, axis=-1) == 2
+    twos = tuple([np.sum(dicObject.chosenComboMat[twosies,i].astype(int)+dicObject.chosenComboMat[twosies,j].astype(int) == 2) for i in range(3) for j in range(3, 6)])
+    print('Twos   | ImWImCor=%-2d ImWGCor=%-2d ImWHCor=%-2d GWImCor=%-2d GWGCor=%-2d GWHCor=%-2d HWImCor=%-2d HWGCor=%-2d HWHCor=%d' % twos)
+    print('       | Total=%d' % sum(twos))
 
-        zerosies = np.sum(dicObject.chosenComboMat, axis=-1) == 0
-        zeros = np.sum(~dicObject.chosenComboMat[zerosies,0])
-        print('-------------zeros-------------')
-        print('zeros: %d' %zeros)
+    threesies = np.sum(dicObject.chosenComboMat, axis=-1) == 3
+    threes = tuple([np.sum(dicObject.chosenComboMat[threesies,i].astype(int)+dicObject.chosenComboMat[threesies,j].astype(int)+dicObject.chosenComboMat[threesies,k].astype(int) == 3)
+                    for i,j,k in zip([0]*3+[1]*3+[2]*3+[0]*6+[1]*3, [3,3,4]*3+[1]*3+[2]*6, [4,5,5]*3+[3,4,5]*3)])
+    print('Threes | ImWImGCorr=%-2d ImWImHCorr=%-2d ImWGHCorr=%-2d GWImGCorr=%-2d  GWImHCorr=%-2d GWGHCorr=%-2d  HWImGCorr=%-2d HWImHCorr=%-2d HWGHCorr=%d' % threes[:9])
+    print('       | ImGWImCorr=%-2d ImGWGCorr=%-2d  ImGWHCorr=%-2d ImHWImCorr=%-2d ImHWGCorr=%-2d ImHWHCorr=%-2d GHWImCorr=%-2d GHWGCorr=%-2d  GHWHCorr=%d' % threes[9:])
+    print('       | Total=%d' % sum(threes))
 
-        twosies = np.sum(dicObject.chosenComboMat, axis=-1) == 2
-        
-        ImWImCor = np.sum(np.array(dicObject.chosenComboMat[twosies,0].astype(int)+dicObject.chosenComboMat[twosies,3].astype(int)) == 2)
-        ImWGCor =  np.sum(np.array(dicObject.chosenComboMat[twosies,0].astype(int)+dicObject.chosenComboMat[twosies,4].astype(int)) == 2)
-        ImWHCor =  np.sum(np.array(dicObject.chosenComboMat[twosies,0].astype(int)+dicObject.chosenComboMat[twosies,5].astype(int)) == 2)
-        GWImCor =  np.sum(np.array(dicObject.chosenComboMat[twosies,1].astype(int)+dicObject.chosenComboMat[twosies,3].astype(int)) == 2)
-        GWGCor =   np.sum(np.array(dicObject.chosenComboMat[twosies,1].astype(int)+dicObject.chosenComboMat[twosies,4].astype(int)) == 2)
-        GWHCor =   np.sum(np.array(dicObject.chosenComboMat[twosies,1].astype(int)+dicObject.chosenComboMat[twosies,5].astype(int)) == 2)
-        HWImCor =  np.sum(np.array(dicObject.chosenComboMat[twosies,2].astype(int)+dicObject.chosenComboMat[twosies,3].astype(int)) == 2)
-        HWGCor =   np.sum(np.array(dicObject.chosenComboMat[twosies,2].astype(int)+dicObject.chosenComboMat[twosies,4].astype(int)) == 2)
-        HWHCor =   np.sum(np.array(dicObject.chosenComboMat[twosies,2].astype(int)+dicObject.chosenComboMat[twosies,5].astype(int)) == 2)
+    foursies = np.sum(dicObject.chosenComboMat, axis=-1) == 4
+    fours = tuple([np.sum((~dicObject.chosenComboMat[foursies,i]).astype(int)+(~dicObject.chosenComboMat[foursies,j]).astype(int) == 2)
+                   for i,j in zip([0]*3+[1]*3+[2]*3+[2,2,0,4,3,3], [3,4,5]*3+[1,0,1,5,5,4])])
+    print('Fours  | missingImNotImCorr=%-2d missingImNotGCorr=%-2d missingImNotHCorr=%-2d missingGNotImCorr=%-2d missingGNotGCorr=%-2d  missingGNotHCorr=%d' % fours[:6])
+    print('       | missingHNotImCorr=%-2d  missingHNotGCorr=%-2d  missingHNotHCorr=%-2d  missingHmissingG=%-2d  missingHmissingIm=%-2d missingImmissingG=%d' % fours[6:12])
+    print('       | NotHCorrNotGCorr=%-2d   NotHCorrNotImCorr=%-2d NotImCorrNotGCorr=%d' % fours[12:])
+    print('       | Total=%d' % sum(fours))
 
-        print('-------------twos-------------')
-        print('ImWImCor: %d' %ImWImCor)
-        print('ImWGCor: %d' %ImWGCor)
-        print('ImWHCor: %d' %ImWHCor)
-        print('GWImCor: %d' %GWImCor)
-        print('GWGCor: %d' %GWGCor)
-        print('GWHCor: %d' %GWHCor)
-        print('HWImCor: %d' %HWImCor)
-        print('HWGCor: %d' %HWGCor)
-        print('HWHCor: %d' %HWHCor)
-        print('Sub total: %d' %np.sum(twosies))
+    fivesies = np.sum(dicObject.chosenComboMat, axis=-1) == 5
+    fives = tuple([np.sum(~dicObject.chosenComboMat[fivesies,i]) for i in range(6)])
+    print('Fives  | missingIm=%-2d missingGrad=%-2d missingHess=%-2d NotImCorr=%-2d NotGCorr=%-2d NotHCorr=%d' % fives)
+    print('       | Total=%d' % sum(fives))
 
+    full = np.sum(np.sum(dicObject.chosenComboMat, axis=-1) == 6)
+    print('Full   | AllGradientProcessing=%d' % full)
 
-        threesies = np.sum(dicObject.chosenComboMat, axis=-1) == 3
-        ImWImGCorr = np.sum(np.array(dicObject.chosenComboMat[threesies,0].astype(int)+dicObject.chosenComboMat[threesies,3].astype(int)+dicObject.chosenComboMat[threesies,4].astype(int)) == 3)
-        ImWImHCorr = np.sum(np.array(dicObject.chosenComboMat[threesies,0].astype(int)+dicObject.chosenComboMat[threesies,3].astype(int)+dicObject.chosenComboMat[threesies,5].astype(int)) == 3)
-        ImWGHCorr =  np.sum(np.array(dicObject.chosenComboMat[threesies,0].astype(int)+dicObject.chosenComboMat[threesies,4].astype(int)+dicObject.chosenComboMat[threesies,5].astype(int)) == 3)
-        GWImGCorr =  np.sum(np.array(dicObject.chosenComboMat[threesies,1].astype(int)+dicObject.chosenComboMat[threesies,3].astype(int)+dicObject.chosenComboMat[threesies,4].astype(int)) == 3)
-        GWImHCorr =  np.sum(np.array(dicObject.chosenComboMat[threesies,1].astype(int)+dicObject.chosenComboMat[threesies,3].astype(int)+dicObject.chosenComboMat[threesies,5].astype(int)) == 3)
-        GWGHCorr =   np.sum(np.array(dicObject.chosenComboMat[threesies,1].astype(int)+dicObject.chosenComboMat[threesies,4].astype(int)+dicObject.chosenComboMat[threesies,5].astype(int)) == 3)
-        HWImGCorr =  np.sum(np.array(dicObject.chosenComboMat[threesies,2].astype(int)+dicObject.chosenComboMat[threesies,3].astype(int)+dicObject.chosenComboMat[threesies,4].astype(int)) == 3)
-        HWImHCorr =  np.sum(np.array(dicObject.chosenComboMat[threesies,2].astype(int)+dicObject.chosenComboMat[threesies,3].astype(int)+dicObject.chosenComboMat[threesies,5].astype(int)) == 3)
-        HWGHCorr =   np.sum(np.array(dicObject.chosenComboMat[threesies,2].astype(int)+dicObject.chosenComboMat[threesies,4].astype(int)+dicObject.chosenComboMat[threesies,5].astype(int)) == 3)
-        ImGWImCorr = np.sum(np.array(dicObject.chosenComboMat[threesies,0].astype(int)+dicObject.chosenComboMat[threesies,1].astype(int)+dicObject.chosenComboMat[threesies,3].astype(int)) == 3)
-        ImGWGCorr =  np.sum(np.array(dicObject.chosenComboMat[threesies,0].astype(int)+dicObject.chosenComboMat[threesies,1].astype(int)+dicObject.chosenComboMat[threesies,4].astype(int)) == 3)
-        ImGWHCorr =  np.sum(np.array(dicObject.chosenComboMat[threesies,0].astype(int)+dicObject.chosenComboMat[threesies,1].astype(int)+dicObject.chosenComboMat[threesies,5].astype(int)) == 3)
-        ImHWImCorr = np.sum(np.array(dicObject.chosenComboMat[threesies,0].astype(int)+dicObject.chosenComboMat[threesies,2].astype(int)+dicObject.chosenComboMat[threesies,3].astype(int)) == 3)
-        ImHWGCorr =  np.sum(np.array(dicObject.chosenComboMat[threesies,0].astype(int)+dicObject.chosenComboMat[threesies,2].astype(int)+dicObject.chosenComboMat[threesies,4].astype(int)) == 3)
-        ImHWHCorr =  np.sum(np.array(dicObject.chosenComboMat[threesies,0].astype(int)+dicObject.chosenComboMat[threesies,2].astype(int)+dicObject.chosenComboMat[threesies,5].astype(int)) == 3)
-        GHWImCorr =  np.sum(np.array(dicObject.chosenComboMat[threesies,1].astype(int)+dicObject.chosenComboMat[threesies,2].astype(int)+dicObject.chosenComboMat[threesies,3].astype(int)) == 3)
-        GHWGCorr =   np.sum(np.array(dicObject.chosenComboMat[threesies,1].astype(int)+dicObject.chosenComboMat[threesies,2].astype(int)+dicObject.chosenComboMat[threesies,4].astype(int)) == 3)
-        GHWHCorr =   np.sum(np.array(dicObject.chosenComboMat[threesies,1].astype(int)+dicObject.chosenComboMat[threesies,2].astype(int)+dicObject.chosenComboMat[threesies,5].astype(int)) == 3)
+    _, ax = plt.subplots(figsize=(20, 8), layout='constrained')
+    values = [zeros, *twos, *threes, *fours, *fives, full][::-1]
+    labels = ['Uncomparable picture',
+              '$F(I)$', '$F(|dI/dx|)$', '$F(|d^2I/dx^2|)$', '$F(G)$', '$F(|dG/dx|)$', '$F(|d^2G/dx^2|)$', '$F(H)$', '$F(|dH/dx|)$', '$F(|d^2H/dx^2|)$',
+              '$F(I) \cdot F(|dI/dx|)$', '$F(I) \cdot F(|d^2I/dx^2|)$', '$F(|dI/dx|) \cdot F(|d^2I/dx^2|)$',
+              '$F(G) \cdot F(|dG/dx|)$', '$F(G) \cdot F(|d^2G/dx^2|)$', '$F(|dG/dx|) \cdot F(|d^2G/dx^2|)$',
+              '$F(H) \cdot F(|dH/dx|)$', '$F(H) \cdot F(|d^2H/dx^2|)$', '$F(|dH/dx|) \cdot F(|d^2H/dx^2|)$',
+              '$F(I \cdot G)$', '$F(|d(I \cdot G)/dx|)$', '$F(|d^2(I \cdot G))/dx^2|)$',
+              '$F(I \cdot H)$', '$F(|d(I \cdot H)/dx|)$', '$F(|d^2(I \cdot H))/dx^2|)$',
+              '$F(G \cdot H)$', '$F(|d(G \cdot H)/dx|)$', '$F(|d^2(G \cdot H))/dx^2|)$',
+              '$F(|d(G \cdot H)/dx|) \cdot F(|d^2(G \cdot H))/dx^2|)$', '$F(G \cdot H) \cdot F(|d^2(G \cdot H))/dx^2|)$', '$F(G \cdot H) \cdot F(|d(G \cdot H)/dx|)$',
+              '$F(|d(I \cdot H)/dx|) \cdot F(|d^2(I \cdot H))/dx^2|)$', '$F(I \cdot H) \cdot F(|d^2(I \cdot H))/dx^2|)$', '$F(I \cdot H) \cdot F(|d(I \cdot H)/dx|)$',
+              '$F(|d(I \cdot G)/dx|) \cdot F(|d^2(I \cdot G))/dx^2|)$', '$F(I \cdot G) \cdot F(|d^2(I \cdot G))/dx^2|)$', '$F(I \cdot G) \cdot F(|d(I \cdot G)/dx|)$',
+              '$F(I) \cdot F(|dI/dx|) \cdot F(|d^2I/dx^2|)$', '$F(G) \cdot F(|dG/dx|) \cdot F(|d^2G/dx^2|)$', '$F(H) \cdot F(|dH/dx|) \cdot F(|d^2H/dx^2|)$',
+              '$F(I \cdot G \cdot H)$', '$F(|d(I \cdot G \cdot H)/dx|)$', '$F(|d^2(I \cdot G \cdot H)/dx^2|)$', '$F(G \cdot H) \cdot F(|d(G \cdot H)/dx|) \cdot F(|d^2(G \cdot H))/dx^2|)$',
+              '$F(I \cdot H) \cdot F(|d(I \cdot H)/dx|) \cdot F(|d^2(I \cdot H))/dx^2|)$', '$F(I \cdot G) \cdot F(|d(I \cdot G)/dx|) \cdot F(|d^2(I \cdot G))/dx^2|)$',
+              '$F(|d(I \cdot G \cdot H)/dx|) \cdot F(|d^2(I \cdot G \cdot H)/dx^2|)$', '$F(I \cdot G \cdot H) \cdot F(|d^2(I \cdot G \cdot H)/dx^2|)$',
+              '$F(I \cdot G \cdot H) \cdot F(|d(I \cdot G \cdot H)/dx|)$', '$F(I \cdot G \cdot H) \cdot F(|d(I \cdot G \cdot H)/dx|) \cdot F(|d^2(I \cdot G \cdot H)/dx^2|)$'][::-1]
+    
+    if not showZeros:
+        values.pop(-1)
+        labels.pop(-1)
 
-        print('------------threes------------')
-        print('ImWImGCorr: %d' %ImWImGCorr)
-        print('ImWImHCorr: %d' %ImWImHCorr)
-        print('ImWGHCorr: %d' %ImWGHCorr)
-
-        print('GWImGCorr: %d' %GWImGCorr)
-        print('GWImHCorr: %d' %GWImHCorr)
-        print('GWGHCorr: %d' %GWGHCorr)
-
-        print('HWImGCorr: %d' %HWImGCorr)
-        print('HWImHCorr: %d' %HWImHCorr)
-        print('HWGHCorr: %d' %HWGHCorr)
-
-        print('ImGWImCorr: %d' %ImGWImCorr)
-        print('ImGWGCorr: %d' %ImGWGCorr)
-        print('ImGWHCorr: %d' %ImGWHCorr)
-
-        print('ImHWImCorr: %d' %ImHWImCorr)
-        print('ImHWGCorr: %d' %ImHWGCorr)
-        print('ImHWHCorr: %d' %ImHWHCorr)
-
-        print('GHWImCorr: %d' %GHWImCorr)
-        print('GHWGCorr: %d' %GHWGCorr)
-        print('GHWHCorr: %d' %GHWHCorr)
-        
-        print('Sub total: %d' %np.sum(threesies))
-
-
-        foursies = np.sum(dicObject.chosenComboMat, axis=-1) == 4
-        missingImNotImCorr = np.sum((~dicObject.chosenComboMat[foursies,0]).astype(int)+(~dicObject.chosenComboMat[foursies,3]).astype(int) == 2)
-        missingImNotGCorr =  np.sum((~dicObject.chosenComboMat[foursies,0]).astype(int)+(~dicObject.chosenComboMat[foursies,4]).astype(int) == 2)
-        missingImNotHCorr =  np.sum((~dicObject.chosenComboMat[foursies,0]).astype(int)+(~dicObject.chosenComboMat[foursies,5]).astype(int) == 2)
-        missingGNotImCorr =  np.sum((~dicObject.chosenComboMat[foursies,1]).astype(int)+(~dicObject.chosenComboMat[foursies,3]).astype(int) == 2)
-        missingGNotGCorr =   np.sum((~dicObject.chosenComboMat[foursies,1]).astype(int)+(~dicObject.chosenComboMat[foursies,4]).astype(int) == 2)
-        missingGNotHCorr =   np.sum((~dicObject.chosenComboMat[foursies,1]).astype(int)+(~dicObject.chosenComboMat[foursies,5]).astype(int) == 2)
-        missingHNotImCorr =  np.sum((~dicObject.chosenComboMat[foursies,2]).astype(int)+(~dicObject.chosenComboMat[foursies,3]).astype(int) == 2)
-        missingHNotGCorr =   np.sum((~dicObject.chosenComboMat[foursies,2]).astype(int)+(~dicObject.chosenComboMat[foursies,4]).astype(int) == 2)
-        missingHNotHCorr =   np.sum((~dicObject.chosenComboMat[foursies,2]).astype(int)+(~dicObject.chosenComboMat[foursies,5]).astype(int) == 2)
-
-        missingHmissingG =   np.sum((~dicObject.chosenComboMat[foursies,2]).astype(int)+(~dicObject.chosenComboMat[foursies,1]).astype(int) == 2)
-        missingHmissingIm =  np.sum((~dicObject.chosenComboMat[foursies,2]).astype(int)+(~dicObject.chosenComboMat[foursies,0]).astype(int) == 2)
-        missingImmissingG =  np.sum((~dicObject.chosenComboMat[foursies,0]).astype(int)+(~dicObject.chosenComboMat[foursies,1]).astype(int) == 2)
-        NotHCorrNotGCorr =   np.sum((~dicObject.chosenComboMat[foursies,4]).astype(int)+(~dicObject.chosenComboMat[foursies,5]).astype(int) == 2)
-        NotHCorrNotImCorr =  np.sum((~dicObject.chosenComboMat[foursies,3]).astype(int)+(~dicObject.chosenComboMat[foursies,5]).astype(int) == 2)
-        NotImCorrNotGCorr =  np.sum((~dicObject.chosenComboMat[foursies,3]).astype(int)+(~dicObject.chosenComboMat[foursies,4]).astype(int) == 2)
-
-        print('------------fours-------------')
-        print('missingImNotImCorr: %d' %missingImNotImCorr)
-        print('missingImNotGCorr: %d' %missingImNotGCorr)
-        print('missingImNotHCorr: %d' %missingImNotHCorr)
-
-        print('missingGNotImCorr: %d' %missingGNotImCorr)
-        print('missingGNotGCorr: %d' %missingGNotGCorr)
-        print('missingGNotHCorr: %d' %missingGNotHCorr)
-
-        print('missingHNotImCorr: %d' %missingHNotImCorr)
-        print('missingHNotGCorr: %d' %missingHNotGCorr)
-        print('missingHNotHCorr: %d' %missingHNotHCorr)
-
-        print('missingHmissingG: %d' %missingHmissingG)
-        print('missingHmissingIm: %d' %missingHmissingIm)
-        print('missingImmissingG: %d' %missingImmissingG)
-
-        print('NotHCorrNotGCorr: %d' %NotHCorrNotGCorr)
-        print('NotHCorrNotImCorr: %d' %NotHCorrNotImCorr)
-        print('NotImCorrNotGCorr: %d' %NotImCorrNotGCorr)
-        
-        print('Sub total: %d' %np.sum(foursies))
-        
-
-
-        fivesies = np.sum(dicObject.chosenComboMat, axis=-1) == 5
-        missingIm = np.sum(~dicObject.chosenComboMat[fivesies,0])
-        missingGrad = np.sum(~dicObject.chosenComboMat[fivesies,1])
-        missingHess = np.sum(~dicObject.chosenComboMat[fivesies,2])
-        NotImCorr =  np.sum(~dicObject.chosenComboMat[fivesies,3])
-        NotGCorr =  np.sum(~dicObject.chosenComboMat[fivesies,4])
-        NotHCorr =  np.sum(~dicObject.chosenComboMat[fivesies,5])
-
-        print('------------fives-------------')
-        print('missingIm: %d' %missingIm)
-        print('missingGrad: %d' %missingGrad)
-        print('missingHess: %d' %missingHess)
-        print('NotImCorr: %d' %NotImCorr)
-        print('NotGCorr: %d' %NotGCorr)
-        print('NotHCorr: %d' %NotHCorr)
-        
-        print('Sub total: %d' %np.sum(fivesies))
-
-        allsies = np.sum(dicObject.chosenComboMat, axis=-1) == 6
-        alls = np.sum(allsies)
-        print('------------alls-------------')
-        print('alls: %d' %alls)
-
-        fig, ax1 = plt.subplots(figsize=(11, 11), layout='constrained')
-        values = [zeros,
-                  ImWImCor,#
-                  ImWGCor,#
-                  ImWHCor,#
-                  GWImCor,# 
-                  GWGCor,#
-                  GWHCor,#
-                  HWImCor,# 
-                  HWGCor,#
-                  HWHCor,#
-                  ImWImGCorr,#
-                  ImWImHCorr,#
-                  ImWGHCorr,#
-                  GWImGCorr,#
-                  GWImHCorr,#
-                  GWGHCorr,#
-                  HWImGCorr,# 
-                  HWImHCorr,#
-                  HWGHCorr,#
-                  ImGWImCorr,#
-                  ImGWGCorr,#
-                  ImGWHCorr,#
-                  ImHWImCorr,#
-                  ImHWGCorr,#
-                  ImHWHCorr,#
-                  GHWImCorr,#
-                  GHWGCorr,#
-                  GHWHCorr,#
-                  missingImNotImCorr,#
-                  missingImNotGCorr,#
-                  missingImNotHCorr,#
-                  missingGNotImCorr,#
-                  missingGNotGCorr,#
-                  missingGNotHCorr,#
-                  missingHNotImCorr,#
-                  missingHNotGCorr,#
-                  missingHNotHCorr,#
-                  missingHmissingG,#
-                  missingHmissingIm,#
-                  missingImmissingG,#
-                  NotHCorrNotGCorr,#
-                  NotHCorrNotImCorr,#
-                  NotImCorrNotGCorr,#
-                  missingIm,
-                  missingGrad,
-                  missingHess,
-                  NotImCorr,
-                  NotGCorr,
-                  NotHCorr,
-                  alls#, 
-                  ][::-1]
-        labels = ['Uncomparable picture',
-                 '$F(I)$', 
-                 '$F(|dI/dx|)$',
-                 '$F(|d^2I/dx^2|)$',
-                 '$F(G)$', 
-                 '$F(|dG/dx|)$',
-                 '$F(|d^2G/dx^2|)$',
-                 '$F(H)$', 
-                 '$F(|dH/dx|)$',
-                 '$F(|d^2H/dx^2|)$',
-                 #
-                 '$F(I) \cdot F(|dI/dx|)$',
-                 '$F(I) \cdot F(|d^2I/dx^2|)$',
-                 '$F(|dI/dx|) \cdot F(|d^2I/dx^2|)$',
-                 '$F(G) \cdot F(|dG/dx|)$',
-                 '$F(G) \cdot F(|d^2G/dx^2|)$',
-                 '$F(|dG/dx|) \cdot F(|d^2G/dx^2|)$',
-                 '$F(H) \cdot F(|dH/dx|)$',
-                 '$F(H) \cdot F(|d^2H/dx^2|)$',
-                 '$F(|dH/dx|) \cdot F(|d^2H/dx^2|)$',
-                 #
-                 '$F(I \cdot G)$', 
-                 '$F(|d(I \cdot G)/dx|)$',
-                 '$F(|d^2(I \cdot G))/dx^2|)$',
-                 '$F(I \cdot H)$', 
-                 '$F(|d(I \cdot H)/dx|)$',
-                 '$F(|d^2(I \cdot H))/dx^2|)$',
-                 '$F(G \cdot H)$', 
-                 '$F(|d(G \cdot H)/dx|)$',
-                 '$F(|d^2(G \cdot H))/dx^2|)$',
-                 #
-                 '$F(|d(G \cdot H)/dx|) \cdot F(|d^2(G \cdot H))/dx^2|)$',
-                 '$F(G \cdot H) \cdot F(|d^2(G \cdot H))/dx^2|)$', 
-                 '$F(G \cdot H) \cdot F(|d(G \cdot H)/dx|)$',
-                 '$F(|d(I \cdot H)/dx|) \cdot F(|d^2(I \cdot H))/dx^2|)$',
-                 '$F(I \cdot H) \cdot F(|d^2(I \cdot H))/dx^2|)$', 
-                 '$F(I \cdot H) \cdot F(|d(I \cdot H)/dx|)$',
-                 '$F(|d(I \cdot G)/dx|) \cdot F(|d^2(I \cdot G))/dx^2|)$',
-                 '$F(I \cdot G) \cdot F(|d^2(I \cdot G))/dx^2|)$', 
-                 '$F(I \cdot G) \cdot F(|d(I \cdot G)/dx|)$',
-                 #
-                 '$F(I) \cdot F(|dI/dx|) \cdot F(|d^2I/dx^2|)$',
-                 '$F(G) \cdot F(|dG/dx|) \cdot F(|d^2G/dx^2|)$',
-                 '$F(H) \cdot F(|dH/dx|) \cdot F(|d^2H/dx^2|)$',
-                 '$F(I \cdot G \cdot H)$', 
-                 '$F(|d(I \cdot G \cdot H)/dx|)$',
-                 '$F(|d^2(I \cdot G \cdot H)/dx^2|)$',
-                 '$F(G \cdot H) \cdot F(|d(G \cdot H)/dx|) \cdot F(|d^2(G \cdot H))/dx^2|)$',
-                 '$F(I \cdot H) \cdot F(|d(I \cdot H)/dx|) \cdot F(|d^2(I \cdot H))/dx^2|)$',
-                 '$F(I \cdot G) \cdot F(|d(I \cdot G)/dx|) \cdot F(|d^2(I \cdot G))/dx^2|)$',
-                 '$F(|d(I \cdot G \cdot H)/dx|) \cdot F(|d^2(I \cdot G \cdot H)/dx^2|)$',
-                 '$F(I \cdot G \cdot H) \cdot F(|d^2(I \cdot G \cdot H)/dx^2|)$',
-                 '$F(I \cdot G \cdot H) \cdot F(|d(I \cdot G \cdot H)/dx|)$',
-                 '$F(I \cdot G \cdot H) \cdot F(|d(I \cdot G \cdot H)/dx|) \cdot F(|d^2(I \cdot G \cdot H)/dx^2|)$'#,
-                 #'Total'
-                 ][::-1]
-        
-        if not showZeros:
-            values.pop(-1)
-            labels.pop(-1)
-
-        nonZeroValues = np.array(values).nonzero()[0].astype(int).tolist()
-        realValues = [values[i] for i in nonZeroValues]
-        rects = ax1.barh([labels[i] for i in nonZeroValues], realValues)
-        ax1.xaxis.grid(True)
-        ax1.bar_label(rects, [str(i) for i in realValues])
-        if saveFig:
-            fig.savefig('Figures/Internnal Report %s.pdf' %dicObject.timestamp)
-
-        plt.show()
+    nonZeroValues = np.array(values).nonzero()[0].astype(int).tolist()
+    realValues = [values[i] for i in nonZeroValues]
+    rects = ax.barh([labels[i] for i in nonZeroValues], realValues)
+    ax.xaxis.grid(True)
+    ax.bar_label(rects, [str(i) for i in realValues])
 
 def showInternalResults(dicObject):
-        dicObject.showInternalQuiver()
-        plt.figure()
-        plt.title('Correlation value')
-        plt.imshow(dicObject.CValue)
-        plt.colorbar()
-        plt.figure()
-        plt.title('U(x,y)')
-        plt.imshow(dicObject.internalDisplacement[0])
-        plt.colorbar()
-        plt.figure()
-        plt.title('V(x,y)')
-        plt.imshow(dicObject.internalDisplacement[1])
-        plt.colorbar()
-        plt.figure()
-        plt.title('$|F(x,y)|$')
-        plt.imshow(np.sqrt(dicObject.internalDisplacement[1]**2+dicObject.internalDisplacement[0]**2))
-        plt.colorbar()
-        plt.figure()
-        plt.title('Overlap Diff')
-        plt.imshow(dicObject.overlapDiff)
-        plt.colorbar()
+    dicObject.showQuiver()
+    fig, (ax1, ax2, ax3, ax4, ax5, ax6) = plt.subplots(1, 6, figsize=(26, 5), sharey=True)
+    scale = ax1.imshow(dicObject.CValue); ax1.set_title('Correlation value'); fig.colorbar(scale, ax=ax1, fraction=cBarFrac)
+    scale = ax2.imshow(dicObject.internalDisplacement[0]); ax2.set_title('$U(x,y)$'); fig.colorbar(scale, ax=ax2, fraction=cBarFrac)
+    scale = ax3.imshow(dicObject.internalDisplacement[1]); ax3.set_title('$V(x,y)$'); fig.colorbar(scale, ax=ax3, fraction=cBarFrac)
+    scale = ax4.imshow(np.sqrt(dicObject.internalDisplacement[1]**2+dicObject.internalDisplacement[0]**2))
+    ax4.set_title('$|F(x,y)|$'); fig.colorbar(scale, ax=ax4, fraction=cBarFrac)
+    scale = ax5.imshow(dicObject.overlapDiff); ax5.set_title('Overlap Diff'); fig.colorbar(scale, ax=ax5, fraction=cBarFrac)
 
-        plt.figure()
-        plt.title('Sum of chosen DIC combinations')
-        sumofComb = np.sum(dicObject.chosenComboMat,axis = -1)
-        plt.imshow(sumofComb)
-        plt.colorbar()
-        
-        # Create a figure
-        combNr = np.zeros(dicObject.chosenComboMat.shape[:2])
-        for i in range(dicObject.chosenComboMat.shape[0]):
-            for j in range(dicObject.chosenComboMat.shape[1]):
-                combNr[i, j] = combinations.index(list(dicObject.chosenComboMat[i, j]))
+    sumofComb = np.sum(dicObject.chosenComboMat, axis=-1)
+    scale = ax6.imshow(sumofComb); ax6.set_title('Sum of chosen combinations'); fig.colorbar(scale, ax=ax6, fraction=cBarFrac)
+    
+    # Create a figure
+    combNr = np.zeros(dicObject.chosenComboMat.shape[:2])
+    for i in range(dicObject.chosenComboMat.shape[0]):
+        for j in range(dicObject.chosenComboMat.shape[1]):
+            combNr[i,j] = combinations.index(list(dicObject.chosenComboMat[i,j]))
 
-        fig, axs = plt.subplots(1, 1)
-        fig.suptitle('Chosen DIC combinations')
+    fig, (ax7, ax8) = plt.subplots(1, 2, figsize=(12, 6))
 
-        # Plot the image and quiver
-        axs.imshow(dicObject.image1)
-        axs.quiver(dicObject.discplacementsCoordinates[1], dicObject.discplacementsCoordinates[0], 
-                   dicObject.internalDisplacement[1], dicObject.internalDisplacement[0], color='r')
+    # Plot the image and quiver
+    ax7.imshow(dicObject.img1)
+    ax7.quiver(dicObject.discplacementsCoordinates[1], dicObject.discplacementsCoordinates[0], 
+               dicObject.internalDisplacement[1], dicObject.internalDisplacement[0], color='r')
 
-        # Set axis limits and invert y-axis
-        axs.axis([np.min(dicObject.internalDisplacement[1]), dicObject.image1.shape[1]+10, 
-                  np.min(dicObject.internalDisplacement[0]), dicObject.image1.shape[0]+10])
-        axs.invert_yaxis()
+    # Set axis limits and invert y-axis
+    ax7.axis([np.min(dicObject.internalDisplacement[1]), dicObject.img1.shape[1]+10, 
+              np.min(dicObject.internalDisplacement[0]), dicObject.img1.shape[0]+10])
+    ax7.invert_yaxis()
 
-        # Add text with a rectangle (bbox) around the index for visibility
-        nonZero = np.nonzero(sumofComb)
-        coords_x = dicObject.discplacementsCoordinates[1][nonZero]
-        coords_y = dicObject.discplacementsCoordinates[0][nonZero]
-        nonZeroCombNumbers = combNr[nonZero]
+    # Add text with a rectangle (bbox) around the index for visibility
+    nonZero = np.nonzero(sumofComb)
+    coords_x = dicObject.discplacementsCoordinates[1][nonZero]
+    coords_y = dicObject.discplacementsCoordinates[0][nonZero]
+    nonZeroCombNumbers = combNr[nonZero]
 
-        for i in range(coords_x.shape[0]):
-                axs.text(coords_x[i], coords_y[i], int(nonZeroCombNumbers[i]), ha='center', va='center', color='b', fontsize=12,
-                         bbox=dict(facecolor='white', edgecolor='black', boxstyle='round,pad=0.3', alpha=0.5))
+    if coords_x.shape[0] < 100:
+        bbox = dict(fc='w', ec='k', boxstyle='round,pad=.3', alpha=.5)
+        fs = 12
+    else:
+        bbox = dict(fc='w', ec='k', boxstyle='round,pad=.2', alpha=.5)
+        fs = 8
+    for i in range(coords_x.shape[0]):
+        ax7.text(coords_x[i], coords_y[i], int(nonZeroCombNumbers[i]), ha='center', va='center', c='b', size=fs, bbox=bbox)
+    ax7.set_title('Chosen DIC combinations')
 
-        plt.figure()
-        plt.title('Sum of chosen DIC combinations')
-        plt.imshow(dicObject.comboDiffMat)
-        plt.colorbar()
+    scale = ax8.imshow(dicObject.comboDiffMat); ax8.set_title('Sum of chosen combinations'); fig.colorbar(scale, ax=ax8, fraction=cBarFrac)
