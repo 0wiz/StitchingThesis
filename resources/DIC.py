@@ -1,6 +1,6 @@
 # Local
-import resources.image_interpolator as tools # type: ignore
-import resources.dic_tools as flowTools # type: ignore
+from resources import Tools # type: ignore
+from resources import FlowTools # type: ignore
 
 # Math
 import numpy as np
@@ -42,12 +42,12 @@ class DicClass:
 
     """ Performs DIC computation. """
     def calculate(self):
-        self.overlappingPoint, self.corrMap, self.merged = flowTools.computeDIC(self.img1, self.img2, *self.gpcCombination, self.padType)
+        self.overlappingPoint, self.corrMap, self.merged = FlowTools.computeDIC(self.img1, self.img2, *self.gpcCombination, self.padType)
         self.corrValue = np.max(self.corrMap) / np.sum(self.corrMap)
 
     """ Finds the overlapping regions of image 1 and image 2. Saves them and the overlap quality to the class. """
     def findOverlap(self):
-        self.img2_overlap, self.img1_overlap = flowTools.getOverlap(self.img2, self.img1, -self.overlappingPoint[1], self.overlappingPoint[0])
+        self.img2_overlap, self.img1_overlap = FlowTools.getOverlap(self.img2, self.img1, -self.overlappingPoint[1], self.overlappingPoint[0])
         self.overlap_quality = np.sqrt(np.abs(np.mean(self.img2_overlap, axis=-1)**2 - np.mean(self.img1_overlap, axis=-1)**2))
 
     """ Performs simple exposure adjustment on both images. """
@@ -115,14 +115,14 @@ class DicClass:
             new_y = np.linspace(0, warpSetting.img1.shape[0], warpSetting.img1.shape[0])
             new_X, new_Y = np.meshgrid(new_x, new_y)
 
-            sUV = flowTools.interpolateQuiver(*warpSetting.discplacementsCoordinates, warpSetting.internalDisplacement, order)
-            basis = np.array(tools.polyBasis2D(new_X.ravel(), new_Y.ravel(), order))
-            fitU, fitV = tools.polyFit2D(new_X, new_Y, sUV, basis, order)
+            sUV = FlowTools.interpolateQuiver(*warpSetting.discplacementsCoordinates, warpSetting.internalDisplacement, order)
+            basis = np.array(Tools.polyBasis2D(new_X.ravel(), new_Y.ravel(), order))
+            fitU, fitV = Tools.polyFit2D(new_X, new_Y, sUV, basis, order)
             if self.bigDisplacement is not None:
                 dicX, dicY = [warpSetting.discplacementsCoordinates[i].copy()+self.bigDisplacement[i]/2 for i in (1,0)]
                 displacedX, displacedY = [warpSetting.internalDisplacement[i].copy() for i in (0,1)]
 
-                sUVUnaffected = flowTools.interpolateQuiver(dicX, dicY, (displacedX, displacedY), order)
+                sUVUnaffected = FlowTools.interpolateQuiver(dicX, dicY, (displacedX, displacedY), order)
                 self.internalDisplacementUnaffected = [displacedX, displacedY]
                 self.discplacementsCoordinatesUnaffected = [dicY, dicX]
                 self.sUV0Unaffected = sUVUnaffected
@@ -137,7 +137,7 @@ class DicClass:
 
         self.windowSizeX = int(self.discplacementsCoordinates[1][1,0] - self.discplacementsCoordinates[1][0,0])
         self.windowSizeY = int(self.discplacementsCoordinates[0][0,1] - self.discplacementsCoordinates[0][0,0])
-        self.warpedImage = flowTools.warpToFieldPiecewise(warpSetting.img1, -fitU, fitV)
+        self.warpedImage = FlowTools.warpToFieldPiecewise(warpSetting.img1, -fitU, fitV)
 
         warpSetting.defineImages(self.warpedImage, self.img2_overlap)
         warpSetting.calculate()
@@ -159,19 +159,19 @@ class DicClass:
         order: The order of the polynomial used in minimization.
     """
     def optimizeWarping(self, order=1):
-        basis = tools.polyBasis2D(self.discplacementsCoordinates[1], self.discplacementsCoordinates[0], max_order=order)
+        basis = Tools.polyBasis2D(self.discplacementsCoordinates[1], self.discplacementsCoordinates[0], max_order=order)
         uvShape = (len(basis), 2)
         if (self.sUV0 is None or len(self.sUV0.ravel()) != uvShape[0]*uvShape[1]):
             UV = np.zeros(uvShape)
         else:
             UV = np.reshape(self.sUV0.ravel(), uvShape)
-        error1 = flowTools.error_minimization(UV, self, order, uvShape)
-        result = minimize(flowTools.error_minimization, UV.ravel(), (self, order, uvShape), 'Powell', tol=1e-18, options={"maxiter":1e12})
-        error2 = flowTools.error_minimization(result.x, self, order, uvShape)
+        error1 = FlowTools.error_minimization(UV, self, order, uvShape)
+        result = minimize(FlowTools.error_minimization, UV.ravel(), (self, order, uvShape), 'Powell', tol=1e-18, options={"maxiter":1e12})
+        error2 = FlowTools.error_minimization(result.x, self, order, uvShape)
         if (not result.success or error1 < error2):
             print('Did not finish')
         self.OptimizeResult = result
-        self.newInternalDisplacement = tools.polyFit2D(self.newDiscplacementsCoordinates[1], self.newDiscplacementsCoordinates[0], np.reshape(result.x, uvShape), order=order)
+        self.newInternalDisplacement = Tools.polyFit2D(self.newDiscplacementsCoordinates[1], self.newDiscplacementsCoordinates[0], np.reshape(result.x, uvShape), order=order)
 
     """
     Rolls window and performs DIC calculation to find best GPC combination.
@@ -190,9 +190,9 @@ class DicClass:
             windowsizeY = windowSize
         
         # Pad images here as before
-        im1 = flowTools.padImage(self.img1, (self.img1.shape[0]+np.ceil(windowsizeY).astype(int),
+        im1 = FlowTools.padImage(self.img1, (self.img1.shape[0]+np.ceil(windowsizeY).astype(int),
                                            self.img1.shape[1]+np.ceil(windowsizeX).astype(int)), 'constant')
-        im2 = flowTools.padImage(self.img2, (self.img2.shape[0]+np.ceil(windowsizeY).astype(int) + np.ceil(extraWiggle).astype(int),
+        im2 = FlowTools.padImage(self.img2, (self.img2.shape[0]+np.ceil(windowsizeY).astype(int) + np.ceil(extraWiggle).astype(int),
                                            self.img2.shape[1]+np.ceil(windowsizeX).astype(int)+np.ceil(extraWiggle).astype(int)), 'constant')
         
         y_positions = list(range(0, im1.shape[0] - windowsizeY, stepLength))
@@ -282,7 +282,7 @@ def process_patch(y_s, x_s, im1, im2, windowsizeY, windowsizeX, extraWiggle):
             'combo_diff' : 0
         }
     
-    subDic, chosen_combo, combo_diff = flowTools.findBestGPC(subim1, subim2)
+    subDic, chosen_combo, combo_diff = FlowTools.findBestGPC(subim1, subim2)
     
     return {
         'displacement': [subDic.overlappingPoint[0], subDic.overlappingPoint[1]],

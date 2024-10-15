@@ -1,6 +1,6 @@
 # Local
-import resources.image_interpolator as tools
-from resources.dic_Class import DicClass
+from resources import Tools
+from resources.DIC import DicClass
 
 # Math
 import numpy as np
@@ -397,7 +397,7 @@ def getOverlap(img1, img2, delta_x, delta_y):
     return overlap1-1, overlap2-1
 
 def interpolateQuiver(X, Y, UV, order=3): # TODO: Integrate into class if unaffected is removed
-    basis = tools.polyBasis2D(Y.ravel(), X.ravel(), order)
+    basis = Tools.polyBasis2D(Y.ravel(), X.ravel(), order)
     sUV = np.linalg.lstsq(np.vstack(np.array([basis])).T, np.array([UV[1].ravel(),UV[0].ravel()]).T, rcond=None)[0]
     return sUV
 
@@ -454,7 +454,7 @@ def showWarpComparison(img1:np.ndarray, img2:np.ndarray, warpedImage):
     im1_bool = im1 != 0
     im2_bool = im2 != 0
     use_bool = im1_bool if im2_bool.sum() > im1_bool.sum() else im2_bool
-    maxC = tools.maxC if (isinstance(im1[0], int)) else 1
+    maxC = Tools.maxC if (isinstance(im1[0], int)) else 1
     newDiff = (im1+im2) / np.max(np.abs(im1+im2))
     ax3.imshow(newDiff); ax3.set_axis_off()
     ax3.set_title('New diff: $|I_{ref} - I_{warp}|$ = %.5f' % np.mean(np.abs((im1[use_bool]/maxC)-(im2[use_bool]/maxC))))
@@ -478,8 +478,8 @@ def findTriangle(number, i=[0], j=1, restart=True):
 def mapOldOrderToNewOrder(cOld, oldOrder, newOrder):
     y = np.array([[0,0,0],[1,1,1],[2,2,2]])
     x = np.array([[0,1,2],[0,1,2],[0,1,2]])
-    basisOld = tools.polyBasis2D(x, y, oldOrder)
-    basisNew = tools.polyBasis2D(x, y, newOrder)
+    basisOld = Tools.polyBasis2D(x, y, oldOrder)
+    basisNew = Tools.polyBasis2D(x, y, newOrder)
     cNew = np.zeros(len(basisNew))
     for i,baseOld in enumerate(basisOld):
         for j,baseNew in enumerate(basisNew):
@@ -503,7 +503,7 @@ Returns:
 """
 def error_minimization(UV, dicClass, order, uvShape):
     UV = np.reshape(UV, uvShape)
-    U, V = tools.polyFit2D(dicClass.discplacementsCoordinates[1], dicClass.discplacementsCoordinates[0], UV, order=order)
+    U, V = Tools.polyFit2D(dicClass.discplacementsCoordinates[1], dicClass.discplacementsCoordinates[0], UV, order=order)
     return np.mean(np.linalg.norm(np.array([dicClass.internalDisplacement[0],dicClass.internalDisplacement[1]])-np.array([V, U]), axis=0))
 
 """
@@ -521,7 +521,7 @@ Returns:
 """
 def error_minimizationUnaffected(UV, dicClass, order, uvShape):
     UV = np.reshape(UV, uvShape)
-    U, V = tools.polyFit2D(dicClass.discplacementsCoordinatesUnaffected[1], dicClass.discplacementsCoordinatesUnaffected[0], UV, order=order)
+    U, V = Tools.polyFit2D(dicClass.discplacementsCoordinatesUnaffected[1], dicClass.discplacementsCoordinatesUnaffected[0], UV, order=order)
     return np.mean(np.linalg.norm(np.array([dicClass.internalDisplacementUnaffected[0],dicClass.internalDisplacementUnaffected[1]])-np.array([V, U]), axis=0))
 
 def findBestGPC(img1, img2, best=None):

@@ -1,5 +1,5 @@
 # Local
-import resources.dic_tools as flowTools # type: ignore
+from resources import FlowTools # type: ignore
 
 # Math
 import numpy as np
@@ -8,9 +8,9 @@ def OpticalFlow(img1, img2, ransac_tol=30, rollingWindowStepSize=25,
                  windowSizeX=50, windowSizeY=50, extraWiggle=10, order=2):
 
     print('Beginning Optical Flow')
-    bigPicDic, _, _ = flowTools.findBestGPC(img1, img2)
+    bigPicDic, _, _ = FlowTools.findBestGPC(img1, img2)
     print('Overlap Found')
-    smallerDIC, _, _ = flowTools.findBestGPC(bigPicDic.img1_overlap, bigPicDic.img2_overlap)
+    smallerDIC, _, _ = FlowTools.findBestGPC(bigPicDic.img1_overlap, bigPicDic.img2_overlap)
 
     print('Beginning Rolling Window')
     smallerDIC.rollWindowAndFindBestGPC(rollingWindowStepSize, windowSizeX, windowSizeY, extraWiggle)

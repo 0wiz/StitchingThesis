@@ -1,5 +1,5 @@
 # Local
-import resources.image_interpolator as tools # type: ignore
+from resources import Tools # type: ignore
 
 # Math
 import numpy as np
@@ -13,7 +13,7 @@ def MedSim(matches):
 
 # Filter with RANSAC (t: Maximum allowed reprojection error to treat a point pair as an inlier)
 def RANSAC(matches, t=30):
-    p1, p2 = tools.getMatchPoints(matches, kp1, kp2)
+    p1, p2 = Tools.getMatchPoints(matches, kp1, kp2)
     _, labels = cv.findHomography(p1.T, p2.T, cv.RANSAC, t)
     return [matches[i] for i,l in enumerate(labels) if l == 1]
 
@@ -32,8 +32,8 @@ def FeatureDetection(img1, img2, ransac_tol=30, order=2):
     # Filter
     filterMatches = RANSAC(MedSim(matches), t=ransac_tol)
     minAlgo = 'Powell'; tol = 1e-6
-    c1 = c2 = np.zeros((tools.polyTerms2D(order), 2))
-    p1, p2 = tools.getMatchPoints(filterMatches, kp1, kp2)
-    p1G, p2G, translation, rotation, center, angle = tools.globalAlignment(p1, p2)
-    p1L, p2L, c1, c2 = tools.localAlignment(p1G, p2G, c1, c2, order, minAlgo, tol)
+    c1 = c2 = np.zeros((Tools.polyTerms2D(order), 2))
+    p1, p2 = Tools.getMatchPoints(filterMatches, kp1, kp2)
+    p1G, p2G, translation, rotation, center, angle = Tools.globalAlignment(p1, p2)
+    p1L, p2L, c1, c2 = Tools.localAlignment(p1G, p2G, c1, c2, order, minAlgo, tol)
     return p1L, p2L, c1, c2, translation, rotation, center, angle
