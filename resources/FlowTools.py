@@ -537,7 +537,7 @@ def findBestGPC(img1, img2, best=None):
             dic.findOverlap()
             return dic, iteration, dic.overlap_quality != 0
         except:
-            print('Combination #%d failed' % iteration)
+            print('Combination #%d failed\n' % iteration)
             return None, None, None
 
     with ThreadPoolExecutor() as executor:
@@ -552,7 +552,7 @@ def findBestGPC(img1, img2, best=None):
                 else:
                     quality_diff = np.mean(best.overlap_quality[best.overlap_quality != 0]) - np.mean(dic.overlap_quality[dic_bool])
 
-                if best is None or quality_diff > 0:
+                if best is None or quality_diff > 1e-4:
                     best = dic
                     best_i = i
                     abs_diff = quality_diff
@@ -593,7 +593,7 @@ def getInternalReport(dicObject, showZeros=False):
     full = np.sum(np.sum(dicObject.chosenComboMat, axis=-1) == 6)
     print('Full   | AllGradientProcessing=%d' % full)
 
-    _, ax = plt.subplots(figsize=(20, 8), layout='constrained')
+    _, ax = plt.subplots(figsize=(15, 8), layout='constrained')
     values = [zeros, *twos, *threes, *fours, *fives, full][::-1]
     labels = ['Uncomparable picture',
               '$F(I)$', '$F(|dI/dx|)$', '$F(|d^2I/dx^2|)$', '$F(G)$', '$F(|dG/dx|)$', '$F(|d^2G/dx^2|)$', '$F(H)$', '$F(|dH/dx|)$', '$F(|d^2H/dx^2|)$',
@@ -624,49 +624,28 @@ def getInternalReport(dicObject, showZeros=False):
 
 def showInternalResults(dicObject):
     dicObject.showQuiver()
-    fig, (ax1, ax2, ax3, ax4, ax5, ax6) = plt.subplots(1, 6, figsize=(26, 5), sharey=True)
-    scale = ax1.imshow(dicObject.CValue); ax1.set_title('Correlation value'); fig.colorbar(scale, ax=ax1, fraction=cBarFrac)
-    scale = ax2.imshow(dicObject.internalDisplacement[0]); ax2.set_title('$U(x,y)$'); fig.colorbar(scale, ax=ax2, fraction=cBarFrac)
-    scale = ax3.imshow(dicObject.internalDisplacement[1]); ax3.set_title('$V(x,y)$'); fig.colorbar(scale, ax=ax3, fraction=cBarFrac)
-    scale = ax4.imshow(np.sqrt(dicObject.internalDisplacement[1]**2+dicObject.internalDisplacement[0]**2))
-    ax4.set_title('$|F(x,y)|$'); fig.colorbar(scale, ax=ax4, fraction=cBarFrac)
-    scale = ax5.imshow(dicObject.overlapDiff); ax5.set_title('Overlap Diff'); fig.colorbar(scale, ax=ax5, fraction=cBarFrac)
-
-    sumofComb = np.sum(dicObject.chosenComboMat, axis=-1)
-    scale = ax6.imshow(sumofComb); ax6.set_title('Sum of chosen combinations'); fig.colorbar(scale, ax=ax6, fraction=cBarFrac)
+    plt.figure(figsize=(20, 8))
     
-    # Create a figure
-    combNr = np.zeros(dicObject.chosenComboMat.shape[:2])
-    for i in range(dicObject.chosenComboMat.shape[0]):
-        for j in range(dicObject.chosenComboMat.shape[1]):
-            combNr[i,j] = combinations.index(list(dicObject.chosenComboMat[i,j]))
-
-    fig, (ax7, ax8) = plt.subplots(1, 2, figsize=(12, 6))
-
     # Plot the image and quiver
-    ax7.imshow(dicObject.img1)
-    ax7.quiver(dicObject.discplacementsCoordinates[1], dicObject.discplacementsCoordinates[0], 
+    plt.imshow(dicObject.img1)
+    plt.quiver(dicObject.discplacementsCoordinates[1], dicObject.discplacementsCoordinates[0], 
                dicObject.internalDisplacement[1], dicObject.internalDisplacement[0], color='r')
 
     # Set axis limits and invert y-axis
-    ax7.axis([np.min(dicObject.internalDisplacement[1]), dicObject.img1.shape[1]+10, 
+    plt.axis([np.min(dicObject.internalDisplacement[1]), dicObject.img1.shape[1]+10, 
               np.min(dicObject.internalDisplacement[0]), dicObject.img1.shape[0]+10])
-    ax7.invert_yaxis()
+    plt.invert_yaxis()
 
     # Add text with a rectangle (bbox) around the index for visibility
-    nonZero = np.nonzero(sumofComb)
-    coords_x = dicObject.discplacementsCoordinates[1][nonZero]
-    coords_y = dicObject.discplacementsCoordinates[0][nonZero]
-    nonZeroCombNumbers = combNr[nonZero]
-
-    if coords_x.shape[0] < 100:
+    x = dicObject.discplacementsCoordinates[1].ravel()
+    y = dicObject.discplacementsCoordinates[0].ravel()
+    l = [combinations.index(list(c)) for c in dicObject.chosenComboMat.reshape(int(np.prod(dicObject.chosenComboMat.shape)/6), 6)]
+    if len(x) < 100:
         bbox = dict(fc='w', ec='k', boxstyle='round,pad=.3', alpha=.5)
         fs = 12
     else:
         bbox = dict(fc='w', ec='k', boxstyle='round,pad=.2', alpha=.5)
         fs = 8
-    for i in range(coords_x.shape[0]):
-        ax7.text(coords_x[i], coords_y[i], int(nonZeroCombNumbers[i]), ha='center', va='center', c='b', size=fs, bbox=bbox)
-    ax7.set_title('Chosen DIC combinations')
-
-    scale = ax8.imshow(dicObject.comboDiffMat); ax8.set_title('Sum of chosen combinations'); fig.colorbar(scale, ax=ax8, fraction=cBarFrac)
+    for i in range(len(x)):
+        plt.text(x[i], y[i], l[i], ha='center', va='center', c='b', size=fs, bbox=bbox)
+    plt.title('Chosen DIC combinations')

@@ -1,5 +1,6 @@
 # Math
 import numpy as np
+import matplotlib as mlab
 import matplotlib.pyplot as plt
 from scipy.optimize import minimize
 
@@ -13,6 +14,14 @@ from operator import attrgetter as attr
 timestamp = lambda: datetime.now().strftime('%Y-%m-%d %H.%M.%S')
 maxC = np.iinfo(np.uint8).max # Max color value in standard cases
 ch = 3 # Number of color channels in RGB
+
+""" Set display settings for kernel """
+def displaySettings():
+    np.set_printoptions(3, linewidth=200)
+    mlab.rc('legend', fontsize=12)
+    mlab.rcParams['axes.formatter.use_mathtext'] = True
+    plt.rc('font', family='serif', serif='cmr10', size=plt.rcParams['legend.fontsize']+4)
+    plt.rc('axes', unicode_minus=False)
 
 """ Save image according to set standard and type """
 def save(name, img, stamp=timestamp, path='Figures/', compression=50, imgExt='.jpg'):
@@ -39,10 +48,10 @@ rotMat = lambda angle: np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle)
 polyTerms2D = lambda order: (order+1)**2 - (order**2+order)//2 # Sqaure - Triangle
 
 """ Return the fit basis polynomials: 1, x, x^2, ..., xy, x^2y, ... etc. """
-def polyBasis2D(x, y, max_order=4):
+def polyBasis2D(x, y, order=2):
     basis = []
-    for i in range(max_order+1):
-        for j in range(max_order - i +1):
+    for i in range(order+1):
+        for j in range(order+1-i):
             basis.append(x**j * y**i)
     return basis
 

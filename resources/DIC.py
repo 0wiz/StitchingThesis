@@ -88,9 +88,8 @@ class DicClass:
         ax1.imshow(self.img1); ax1.set_axis_off(); ax1.set_title('Image to be compared')
 
         ax2.imshow(self.img1); ax2.set_axis_off(); ax2.set_title('Quiver')
-        nonZero = np.nonzero(np.sum(self.chosenComboMat, axis=-1))
-        ax2.quiver(self.discplacementsCoordinates[1][nonZero], self.discplacementsCoordinates[0][nonZero], self.internalDisplacement[1][nonZero], self.internalDisplacement[0][nonZero], color='r')
-        ax2.axis([np.min(self.internalDisplacement[1][nonZero]), self.img1.shape[1]+10, np.min(self.internalDisplacement[0][nonZero]), self.img1.shape[0]+10])
+        ax2.quiver(self.discplacementsCoordinates[1], self.discplacementsCoordinates[0], self.internalDisplacement[1], self.internalDisplacement[0], color='r')
+        ax2.axis([np.min(self.internalDisplacement[1]), self.img1.shape[1]+10, np.min(self.internalDisplacement[0]), self.img1.shape[0]+10])
         ax2.invert_yaxis()
 
         ax3.imshow(self.img2); ax3.set_axis_off(); ax3.set_title('Reference Image')
@@ -123,8 +122,8 @@ class DicClass:
                 displacedX, displacedY = [warpSetting.internalDisplacement[i].copy() for i in (0,1)]
 
                 sUVUnaffected = FlowTools.interpolateQuiver(dicX, dicY, (displacedX, displacedY), order)
-                self.internalDisplacementUnaffected = [displacedX, displacedY]
-                self.discplacementsCoordinatesUnaffected = [dicY, dicX]
+                self.internalDisplacementUnaffected = np.array([displacedX, displacedY])
+                self.discplacementsCoordinatesUnaffected = np.array([dicY, dicX])
                 self.sUV0Unaffected = sUVUnaffected
         else: 
             fitU, fitV = self.newInternalDisplacement
@@ -132,21 +131,21 @@ class DicClass:
             sUV = self.sUV0
             basis = self.fitBasis
 
-        warpSetting.internalDisplacement = [fitU, fitV]
-        warpSetting.discplacementsCoordinates = [new_Y, new_X]
+        warpSetting.internalDisplacement = np.array([fitU, fitV])
+        warpSetting.discplacementsCoordinates = np.array([new_Y, new_X])
 
-        self.windowSizeX = int(self.discplacementsCoordinates[1][1,0] - self.discplacementsCoordinates[1][0,0])
-        self.windowSizeY = int(self.discplacementsCoordinates[0][0,1] - self.discplacementsCoordinates[0][0,0])
+        warpSetting.windowSizeX = int(warpSetting.discplacementsCoordinates[1][1,0] - warpSetting.discplacementsCoordinates[1][0,0])
+        warpSetting.windowSizeY = int(warpSetting.discplacementsCoordinates[0][0,1] - warpSetting.discplacementsCoordinates[0][0,0])
         self.warpedImage = FlowTools.warpToFieldPiecewise(warpSetting.img1, -fitU, fitV)
 
         warpSetting.defineImages(self.warpedImage, self.img2_overlap)
         warpSetting.calculate()
         warpSetting.findOverlap()
         if not optimized:
-            warpSetting.internalDisplacement = [fitU, fitV]
-            self.newInternalDisplacement = [fitU, fitV]
-            warpSetting.discplacementsCoordinates = [new_Y, new_X]
-            self.newDiscplacementsCoordinates = [new_Y, new_X]
+            warpSetting.internalDisplacement = np.array([fitU, fitV])
+            self.newInternalDisplacement = np.array([fitU, fitV])
+            warpSetting.discplacementsCoordinates = np.array([new_Y, new_X])
+            self.newDiscplacementsCoordinates = np.array([new_Y, new_X])
             self.warped_img1_overlap = warpSetting.img1_overlap
             self.warped_img2_overlap = warpSetting.img2_overlap
             self.sUV0 = sUV
@@ -159,7 +158,7 @@ class DicClass:
         order: The order of the polynomial used in minimization.
     """
     def optimizeWarping(self, order=1):
-        basis = Tools.polyBasis2D(self.discplacementsCoordinates[1], self.discplacementsCoordinates[0], max_order=order)
+        basis = Tools.polyBasis2D(self.discplacementsCoordinates[1], self.discplacementsCoordinates[0], order=order)
         uvShape = (len(basis), 2)
         if (self.sUV0 is None or len(self.sUV0.ravel()) != uvShape[0]*uvShape[1]):
             UV = np.zeros(uvShape)
@@ -171,7 +170,7 @@ class DicClass:
         if (not result.success or error1 < error2):
             print('Did not finish')
         self.OptimizeResult = result
-        self.newInternalDisplacement = Tools.polyFit2D(self.newDiscplacementsCoordinates[1], self.newDiscplacementsCoordinates[0], np.reshape(result.x, uvShape), order=order)
+        self.newInternalDisplacement = np.array(Tools.polyFit2D(self.newDiscplacementsCoordinates[1], self.newDiscplacementsCoordinates[0], np.reshape(result.x, uvShape), order=order))
 
     """
     Rolls window and performs DIC calculation to find best GPC combination.
@@ -181,13 +180,12 @@ class DicClass:
         windowSize: The dimensions of the rolling window.
         extraWiggle: Additional room per window roll for DIC to search in.
     """
-    def rollWindowAndFindBestGPC(self, stepLength, *windowSize, extraWiggle=0):
-        if len(windowSize) >= 2:
-            windowsizeX = windowSize[0]
-            windowsizeY = windowSize[1]
-        else:
+    def rollWindowAndFindBestGPC(self, stepLength, windowSize, extraWiggle=0):
+        if type(windowSize) == int:
             windowsizeX = windowSize
             windowsizeY = windowSize
+        else:
+            windowsizeX, windowsizeY = windowSize
         
         # Pad images here as before
         im1 = FlowTools.padImage(self.img1, (self.img1.shape[0]+np.ceil(windowsizeY).astype(int),
@@ -218,14 +216,14 @@ class DicClass:
             chosen_combo_mat.append(result['chosen_combo'])
             combo_diff_mat.append(result['combo_diff'])
 
-        self.discplacementsCoordinates = (
+        self.discplacementsCoordinates = np.array([
             np.reshape(np.array(coordinates)[:,0], (len(y_positions), len(x_positions))),
             np.reshape(np.array(coordinates)[:,1], (len(y_positions), len(x_positions)))
-        )
-        self.internalDisplacement = (
+        ])
+        self.internalDisplacement = np.array([
             -np.reshape(np.array(displacement)[:,0], (len(y_positions), len(x_positions))),
             -np.reshape(np.array(displacement)[:,1], (len(y_positions), len(x_positions)))
-        )
+        ])
         self.CValue = np.reshape(np.array(Cvalue), (len(y_positions), len(x_positions)))
         self.chosenComboMat = np.reshape(np.array(chosen_combo_mat), (len(y_positions), len(x_positions), 6))
         self.overlapDiff = np.reshape(np.array(overlapDiff), (len(y_positions), len(x_positions)))
@@ -243,16 +241,9 @@ class DicClass:
         labels = cv.findHomography(vec1.T, vec2.T, cv.RANSAC, ransac_tol)[1].reshape(self_like.discplacementsCoordinates[0].shape)
         overlap_bool = labels == 1 * ~np.isnan(self_like.CValue)
 
-        self.internalDisplacement = (np.zeros_like(self_like.internalDisplacement[0]),np.zeros_like(self_like.internalDisplacement[0]))
-        self.internalDisplacement[0][overlap_bool] = self_like.internalDisplacement[0][overlap_bool]
-        self.internalDisplacement[1][overlap_bool] = self_like.internalDisplacement[1][overlap_bool]
-        
-        self.discplacementsCoordinates = (np.zeros_like(self_like.discplacementsCoordinates[0]),np.zeros_like(self_like.discplacementsCoordinates[0]))
-        self.discplacementsCoordinates[0][overlap_bool] = self_like.discplacementsCoordinates[0][overlap_bool]
-        self.discplacementsCoordinates[1][overlap_bool] = self_like.discplacementsCoordinates[1][overlap_bool]
-        
-        self.chosenComboMat = np.zeros_like(self_like.chosenComboMat)
-        self.chosenComboMat[overlap_bool,:] = self_like.chosenComboMat[overlap_bool,:]
+        self.internalDisplacement = np.array([self_like.internalDisplacement[i][overlap_bool] for i in (0,1)])
+        self.discplacementsCoordinates = np.array([self_like.discplacementsCoordinates[i][overlap_bool] for i in (0,1)])
+        self.chosenComboMat = self_like.chosenComboMat[overlap_bool,:]
         
         self.comboDiffMat = np.zeros_like(self_like.comboDiffMat)
         self.comboDiffMat[overlap_bool] = self_like.comboDiffMat[overlap_bool]
