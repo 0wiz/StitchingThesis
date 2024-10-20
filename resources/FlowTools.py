@@ -5,6 +5,7 @@ from resources.DIC import DicClass
 # Math
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.special import comb
 from scipy.ndimage import map_coordinates
 
 # Data
@@ -649,3 +650,55 @@ def showInternalResults(dicObject):
     for i in range(len(x)):
         plt.text(x[i], y[i], l[i], ha='center', va='center', c='b', size=fs, bbox=bbox)
     plt.title('Chosen DIC combinations')
+
+def get_polynomial_order(num_coeffs):
+    """
+    Determine the order of the polynomial based on the number of coefficients.
+    """
+    order = 0
+    while (order + 1) * (order + 2) // 2 <= num_coeffs:
+        order += 1
+    return order - 1
+
+def transform_polynomial(coeffs, h, k):
+    """
+    Transform the polynomial coefficients when the origin is shifted by (h, k).
+    
+    :param coeffs: 1D numpy array where each element is a coefficient for terms x^i y^j.
+    :param h: Shift in x direction.
+    :param k: Shift in y direction.
+    :return: 1D numpy array of the transformed coefficients.
+    """
+    
+    # Calculate the order of the polynomial
+    num_coeffs = len(coeffs)
+    order = get_polynomial_order(num_coeffs)
+    
+    # Initialize the new coefficients array
+    new_coeffs = np.zeros_like(coeffs)
+    
+    # Create a mapping from index to (i, j) pairs
+    index_to_ij = []
+    idx = 0
+    for i in range(order + 1):
+        for j in range(order + 1 - i):
+            index_to_ij.append((j, i))
+            idx += 1
+    
+    # Map the input coefficients to a structured 2D array
+    poly_coeffs = np.zeros((order + 1, order + 1))
+    for idx, (i, j) in enumerate(index_to_ij):
+        poly_coeffs[i, j] = coeffs[idx]
+
+    # Iterate through all possible terms in the original polynomial
+    for i in range(order + 1):
+        for j in range(order + 1 - i):
+            if poly_coeffs[i, j] != 0:
+                for m in range(i + 1):
+                    for l in range(j + 1):
+                        new_coeffs_idx = index_to_ij.index((m, l))
+                        new_coeffs[new_coeffs_idx] += (
+                            poly_coeffs[i, j] * comb(i, m) * h**(i-m) * comb(j, l) * k**(j-l)
+                        )
+    
+    return new_coeffs

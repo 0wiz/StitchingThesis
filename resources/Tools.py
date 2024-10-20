@@ -231,7 +231,7 @@ def refineAndConcatenateOverlaps(p0, p1, p2, imgs):
 
     overlap1 = overlap[0,y_min:y_max,x_min:x_max,:] + notover[0,y_min:y_max,x_min:x_max,:]
     overlap2 = overlap[1,y_min:y_max,x_min:x_max,:] + notover[1,y_min:y_max,x_min:x_max,:]
-    return np.concatenate([overlap1, overlap2], axis=1)
+    return np.concatenate([overlap1, overlap2], axis=1), y_min, y_max, x_min, x_max
 
 """ Applies the c functions to both images with a given inital overlap """
 def opticalFlowInterpolator(img1, img2, c_dis, c_no_dis, order, overlapDisplacement, imgs, showTranslation=False):
