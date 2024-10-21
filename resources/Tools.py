@@ -44,8 +44,11 @@ getMatchPoints = lambda matches, kp1, kp2: [np.array([[kp[idx(m)].pt[dim] for m 
 """ Rotation matrix to matrix-pre-multiply coordinates in the format [[x₁, x₂, ..., xₙ], [y₁, y₂, ..., yₙ]] """
 rotMat = lambda angle: np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
 
-""" The number of terms in a n:th order 2D-polynomial """
+""" Gets the number of terms in a n:th order 2D-polynomial """
 polyTerms2D = lambda order: (order+1)**2 - (order**2+order)//2 # Sqaure - Triangle
+
+""" Gets the order of a 2D-polynomial with n number of terms """
+polyOrder2D = lambda terms: (int)(np.round(np.sqrt(2*terms+.25)-1.5))
 
 """ Return the fit basis polynomials: 1, x, x^2, ..., xy, x^2y, ... etc. """
 def polyBasis2D(x, y, order=2):
@@ -209,7 +212,6 @@ def refineOverlap(overlap, s=1):
 
 """ Perform local and global alignment for given c values """
 def mergeAndWarpImages(p01, p02, c1, c2, order, translation, rotation, center, imgs):
-    # Apply warping to the images
     p1, p2 = globalAlignment(p01, p02, translation, rotation, center)[:2]
     p1, p2 = localAlignment(p1, p2, c1, c2, order)[:2]
     img, diff, _, overlap = overlayImages(p01, p1, p2, imgs)
