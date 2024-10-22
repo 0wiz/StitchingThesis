@@ -14,21 +14,19 @@ from concurrent.futures import ThreadPoolExecutor
 class DicClass:
     """ Class for performing Digital Image Correlation (DIC) operations on images. """
     def __init__ (self, gpcCombination=[True,False,False,True,False,False], padType='constant'):
-        self.img1 = None                                    # First image for comparison.
-        self.img2 = None                                    # Second image for comparison.
-        self.img1_overlap = None                            # Overlapping region of the first image.
-        self.img2_overlap = None                            # Overlapping region of the second image.
-        self.overlappingPoint = None                        # Coordinates of the overlapping point.
-        self.corrValue = None                               # Correlation value between img1 and img2.
-        self.gpcCombination = gpcCombination                # Combination of Gradient-Processed Correlation (GPC) to use
-        self.padType = padType                              # Type of padding for images ('constant' by default).
-        self.internalDisplacement = None                    # Internal displacements of image 1.
-        self.CValue = None                                  # Correlation values across displacements.
-        self.discplacementsCoordinates = None               # Coordinates of displacements.
-        self.sUV0 = None                                    # Initial displacement field for optimization. 
+        self.img1 = None                        # First image for comparison.
+        self.img2 = None                        # Second image for comparison.
+        self.img1_overlap = None                # Overlapping region of the first image.
+        self.img2_overlap = None                # Overlapping region of the second image.
+        self.overlappingPoint = None            # Coordinates of the overlapping point.
+        self.corrValue = None                   # Correlation value between img1 and img2.
+        self.gpcCombination = gpcCombination    # Combination of Gradient-Processed Correlation (GPC) to use
+        self.padType = padType                  # Type of padding for images ('constant' by default).
+        self.internalDisplacement = None        # Internal displacements of image 1.
+        self.CValue = None                      # Correlation values across displacements.
+        self.discplacementsCoordinates = None   # Coordinates of displacements.
+        self.sUV0 = None                        # Initial displacement field for optimization. 
         self.OptimizeResult = None
-        self.bigDisplacement = None
-        self.sUV0Unaffected = None # Is unaffected actually presented anywhere?
 
     """
     Defines the images for DIC.
@@ -114,22 +112,17 @@ class DicClass:
             new_y = np.linspace(0, warpSetting.img1.shape[0], warpSetting.img1.shape[0])
             new_X, new_Y = np.meshgrid(new_x, new_y)
 
-            sUV = FlowTools.interpolateQuiver(*warpSetting.discplacementsCoordinates, warpSetting.internalDisplacement, order)
-            basis = np.array(Tools.polyBasis2D(new_X.ravel(), new_Y.ravel(), order))
-            fitU, fitV = Tools.polyFit2D(new_X, new_Y, sUV, basis, order)
-            if self.bigDisplacement is not None:
-                dicX, dicY = [warpSetting.discplacementsCoordinates[i].copy()+self.bigDisplacement[i]/2 for i in (1,0)]
-                displacedX, displacedY = [warpSetting.internalDisplacement[i].copy() for i in (0,1)]
-
-                sUVUnaffected = FlowTools.interpolateQuiver(dicX, dicY, (displacedX, displacedY), order)
-                self.internalDisplacementUnaffected = np.array([displacedX, displacedY])
-                self.discplacementsCoordinatesUnaffected = np.array([dicY, dicX])
-                self.sUV0Unaffected = sUVUnaffected
+            basis = np.vstack(np.array([Tools.polyBasis2D(warpSetting.discplacementsCoordinates[1].ravel(), 
+                                                          warpSetting.discplacementsCoordinates[0].ravel(), order)])).T
+            sUV = np.linalg.lstsq(basis, np.array([warpSetting.internalDisplacement[1].ravel(), 
+                                                   warpSetting.internalDisplacement[0].ravel()]).T, rcond=None)[0]
+            new_basis = np.array(Tools.polyBasis2D(new_X.ravel(), new_Y.ravel(), order))
+            fitU, fitV = Tools.polyFit2D(new_X, new_Y, sUV, new_basis, order)
         else: 
             fitU, fitV = self.newInternalDisplacement
             new_Y, new_X = self.newDiscplacementsCoordinates
             sUV = self.sUV0
-            basis = self.fitBasis
+            new_basis = self.fitBasis
 
         warpSetting.internalDisplacement = np.array([fitU, fitV])
         warpSetting.discplacementsCoordinates = np.array([new_Y, new_X])
@@ -149,7 +142,7 @@ class DicClass:
             self.warped_img1_overlap = warpSetting.img1_overlap
             self.warped_img2_overlap = warpSetting.img2_overlap
             self.sUV0 = sUV
-            self.fitBasis = basis
+            self.fitBasis = new_basis
 
     """
     Optimizes image warping using error minimization.

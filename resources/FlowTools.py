@@ -396,11 +396,6 @@ def getOverlap(img1, img2, delta_x, delta_y):
     
     return overlap1-1, overlap2-1
 
-def interpolateQuiver(X, Y, UV, order=3): # TODO: Integrate into class if unaffected is removed
-    basis = Tools.polyBasis2D(Y.ravel(), X.ravel(), order)
-    sUV = np.linalg.lstsq(np.vstack(np.array([basis])).T, np.array([UV[1].ravel(),UV[0].ravel()]).T, rcond=None)[0]
-    return sUV
-
 """
 Warp an image according to given displacement fields using piecewise polynomials (splines).
 
@@ -505,24 +500,6 @@ def error_minimization(UV, dicClass, order, uvShape):
     UV = np.reshape(UV, uvShape)
     U, V = Tools.polyFit2D(dicClass.discplacementsCoordinates[1], dicClass.discplacementsCoordinates[0], UV, order=order)
     return np.mean(np.linalg.norm(np.array([dicClass.internalDisplacement[0],dicClass.internalDisplacement[1]])-np.array([V, U]), axis=0))
-
-"""
-Minimizes the error between the given displacements and the fitted displacements.
-
-Parameters:
-    UV (numpy.ndarray): The array of displacements to be reshaped and fitted.
-    dicClass (object): An object containing displacement coordinates and internal displacement data.
-    order (int): The order of the polynomial for fitting.
-    basis (callable): A basis function to apply to the input data.
-    uvShape (tuple): The shape to reshape the UV array into.
-
-Returns:
-    float: The error between the internal displacement and the fitted displacement.
-"""
-def error_minimizationUnaffected(UV, dicClass, order, uvShape):
-    UV = np.reshape(UV, uvShape)
-    U, V = Tools.polyFit2D(dicClass.discplacementsCoordinatesUnaffected[1], dicClass.discplacementsCoordinatesUnaffected[0], UV, order=order)
-    return np.mean(np.linalg.norm(np.array([dicClass.internalDisplacementUnaffected[0],dicClass.internalDisplacementUnaffected[1]])-np.array([V, U]), axis=0))
 
 def findBestGPC(img1, img2, best=None):
     # Define Gradient-Processed Correlation (GPC)
@@ -634,7 +611,7 @@ def showInternalResults(dicObject):
     # Set axis limits and invert y-axis
     plt.axis([np.min(dicObject.internalDisplacement[1]), dicObject.img1.shape[1]+10, 
               np.min(dicObject.internalDisplacement[0]), dicObject.img1.shape[0]+10])
-    plt.invert_yaxis()
+    plt.gca().invert_yaxis()
 
     # Add text with a rectangle (bbox) around the index for visibility
     x = dicObject.discplacementsCoordinates[1].ravel()
