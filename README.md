@@ -1,6 +1,6 @@
 ## Experimentation code for thesis "Image Stitching for Video: Feature Detection & Optical Flow"
 
-**To be added:** Publication link and doi.
+**Published on DiVA:** https://ltu.diva-portal.org/smash/record.jsf?pid=diva2%3A1907538
 
 ### Abstract
 
